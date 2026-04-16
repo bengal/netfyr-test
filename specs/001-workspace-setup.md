@@ -99,33 +99,79 @@ edition = "2021"
 
 ### Integration test infrastructure
 
-Integration tests are shell scripts in `tests/`, run via `make integration-test` (or a CI step). Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs and dnsmasq as needed, runs `netfyr` CLI commands, and verifies the result with standard tools (`ip`, `grep`, etc.).
+Integration tests are shell scripts in `tests/`, run via `make integration-test`. Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs and dnsmasq as needed, runs `netfyr` CLI commands, and verifies the result with standard tools (`ip`, `grep`, etc.).
 
 Shell scripts avoid the problem of calling `unshare(2)` from a multi-threaded Rust test binary (which fails with `EINVAL`). Each test script runs as a separate single-threaded process.
 
+#### Naming convention
+
+Test scripts are named `NNN-description.sh`, where `NNN` is the spec number the test covers and `description` is a hyphen-separated summary of the scenario. Examples: `102-query-veth-by-name.sh`, `401-dhcpv4-acquire-lease.sh`. The file `helpers.sh` is not a test script and is excluded from discovery by the naming convention.
+
+#### No-skip policy
+
+There is no skip mode. If a test cannot run because a prerequisite is missing (binary not built, `unshare` not available, `dnsmasq` not installed), the test **must print a FAIL message to stderr and `exit 1`**. Never `exit 0` on a missing prerequisite. This ensures that problems are caught immediately rather than silently ignored.
+
+This rule applies to every prerequisite check in every test script:
+- Binary not found → `echo "FAIL: ..." >&2; exit 1`
+- `unshare` not available → `echo "FAIL: ..." >&2; exit 1`
+- `dnsmasq` not installed → `echo "FAIL: ..." >&2; exit 1`
+
+The `netns_setup` and `start_dnsmasq` helpers in `helpers.sh` already enforce this. Test scripts must not wrap these calls with `|| exit 0` or other fallbacks that swallow failures.
+
+#### Binary path resolution
+
+Test scripts locate the `netfyr` and `netfyr-daemon` binaries relative to the script's own directory via `SCRIPT_DIR/../target/debug/`. The path can be overridden via environment variables (`NETFYR_BIN`, `NETFYR_DAEMON_BIN`). The `Makefile`'s `integration-test` target runs `cargo build` before running test scripts, ensuring the binaries exist.
+
+#### Verification requirement
+
+**Every story that adds or modifies shell integration test scripts must run `make integration-test` as a verification step.** `cargo test` alone is not sufficient — it only runs Rust tests, not shell scripts. The story's implementation is not complete until all shell integration tests pass. This is an additional verification step beyond `cargo test` (see the verify prompt's step 5).
+
 **`tests/helpers.sh`** -- Shared shell functions sourced by all test scripts:
 
-- **`netns_setup`** -- Runs the rest of the script inside a new user + network namespace via `unshare --user --net`. Fails the test if namespaces are unavailable.
+- **`netns_setup`** -- Runs the rest of the script inside a new user + network namespace via `unshare --user --net`. Exits with code 1 if `unshare` is not available.
 - **`create_veth VETH0 VETH1`** -- Creates a veth pair, brings both ends up.
 - **`add_address IFACE CIDR`** -- Adds an IP address to an interface.
-- **`start_dnsmasq IFACE SERVER_IP RANGE_START RANGE_END LEASE_TIME`** -- Starts a dnsmasq DHCP server on the given interface. Stores the PID for cleanup.
+- **`start_dnsmasq IFACE SERVER_IP RANGE_START RANGE_END LEASE_TIME`** -- Starts a dnsmasq DHCP server on the given interface. Exits with code 1 if `dnsmasq` is not installed. Stores the PID for cleanup.
 - **`cleanup`** -- Kills dnsmasq and cleans up. Registered as a `trap EXIT` handler.
 - **`assert_eq`, `assert_match`, `assert_has_address`, `assert_link_up`** -- Test assertion helpers.
 
-**Example test script** (`tests/test_dhcp_lease.sh`):
+**Example test script** (`tests/401-dhcpv4-lease.sh`):
 
 ```bash
 #!/bin/bash
+# 401-dhcpv4-lease.sh -- Verify DHCPv4 factory acquires a lease.
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
 
-netns_setup
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/helpers.sh"
 
+NETFYR_BIN="${NETFYR_BIN:-$SCRIPT_DIR/../target/debug/netfyr}"
+NETFYR_DAEMON_BIN="${NETFYR_DAEMON_BIN:-$SCRIPT_DIR/../target/debug/netfyr-daemon}"
+
+if [[ ! -x "$NETFYR_BIN" ]]; then
+    echo "FAIL: netfyr binary not found at $NETFYR_BIN" >&2
+    exit 1
+fi
+if [[ ! -x "$NETFYR_DAEMON_BIN" ]]; then
+    echo "FAIL: netfyr-daemon binary not found at $NETFYR_DAEMON_BIN" >&2
+    exit 1
+fi
+
+netns_setup "$@"
+
+# -- Inside the namespace --
 create_veth veth-dhcp0 veth-dhcp1
 add_address veth-dhcp1 10.99.0.1/24
 start_dnsmasq veth-dhcp1 10.99.0.1 10.99.0.100 10.99.0.200 120
 
-cat > /tmp/dhcp-policy.yaml <<EOF
+TMPDIR_TEST=$(mktemp -d)
+trap 'kill "${DAEMON_PID:-}" 2>/dev/null; rm -rf "$TMPDIR_TEST"' EXIT
+
+SOCKET_PATH="$TMPDIR_TEST/netfyr.sock"
+POLICY_DIR="$TMPDIR_TEST/policies"
+mkdir -p "$POLICY_DIR"
+
+cat > "$POLICY_DIR/dhcp.yaml" <<'EOF'
 kind: policy
 name: dhcp-test
 factory: dhcpv4
@@ -133,27 +179,76 @@ selector:
   name: veth-dhcp0
 EOF
 
-netfyr apply /tmp/dhcp-policy.yaml
+NETFYR_SOCKET_PATH="$SOCKET_PATH" \
+NETFYR_POLICY_DIR="$POLICY_DIR" \
+    "$NETFYR_DAEMON_BIN" &
+DAEMON_PID=$!
 
-# Wait for DHCP lease
-sleep 5
+# Wait for daemon socket (poll up to 5 s).
+for i in $(seq 1 50); do
+    [[ -S "$SOCKET_PATH" ]] && break
+    sleep 0.1
+done
+if [[ ! -S "$SOCKET_PATH" ]]; then
+    echo "FAIL: daemon socket did not appear" >&2; exit 1
+fi
+
+NETFYR_SOCKET_PATH="$SOCKET_PATH" "$NETFYR_BIN" apply "$POLICY_DIR/dhcp.yaml"
+
+# Wait for DHCP lease (poll up to 10 s).
+for i in $(seq 1 100); do
+    ip addr show dev veth-dhcp0 2>/dev/null | grep -q "10.99.0." && break
+    sleep 0.1
+done
 
 assert_has_address veth-dhcp0 "10.99.0."
 assert_link_up veth-dhcp0
-echo "PASS: DHCP lease acquired"
+echo "PASS: 401-dhcpv4-lease"
 ```
+
+**Makefile (`integration-test` target):**
+
+The `Makefile` provides a single `integration-test` target. It builds the project first, then discovers and runs all numbered test scripts:
+
+```makefile
+.PHONY: integration-test
+
+integration-test:
+	cargo build
+	@scripts=$$(ls tests/[0-9]*.sh 2>/dev/null); \
+	if [ -z "$$scripts" ]; then \
+		echo "No integration test scripts found in tests/[0-9]*.sh"; \
+		exit 0; \
+	fi; \
+	failed=0; \
+	for script in $$scripts; do \
+		echo "Running $$script ..."; \
+		if bash "$$script"; then \
+			echo "PASS: $$script"; \
+		else \
+			echo "FAIL: $$script"; \
+			failed=1; \
+		fi; \
+	done; \
+	if [ "$$failed" -eq 1 ]; then \
+		echo "One or more integration tests failed."; \
+		exit 1; \
+	else \
+		echo "All integration tests passed."; \
+	fi
+```
+
+Key points: the glob `tests/[0-9]*.sh` matches numbered test scripts and excludes `helpers.sh`. The `cargo build` step ensures binaries exist before any test runs.
 
 **Running integration tests:**
 
 ```bash
-# Run all integration tests
+# Run all integration tests (builds first)
 make integration-test
 
-# Run a single test
-bash tests/test_dhcp_lease.sh
+# Run a single test (binary must already be built)
+bash tests/401-dhcpv4-lease.sh
 ```
-
-Tests fail (exit non-zero) if prerequisites (namespaces, dnsmasq) are unavailable — this ensures missing dependencies are caught immediately rather than silently ignored.
 
 ## Depends on
 (none)
@@ -208,4 +303,24 @@ Feature: Rust workspace setup
     When the file tests/helpers.sh is inspected
     Then it defines functions: netns_setup, create_veth, add_address, start_dnsmasq, cleanup
     And it is sourced by all test scripts in tests/
+
+  Scenario: Makefile integration-test target builds and runs tests
+    Given the Makefile exists
+    When the developer runs "make integration-test"
+    Then cargo build runs first
+    And all tests/[0-9]*.sh scripts are discovered and executed
+    And each test either passes (exit 0) or fails (exit non-zero)
+    And the overall exit code is non-zero if any test failed
+
+  Scenario: Test scripts never skip on missing prerequisites
+    Given a test script that requires unshare, dnsmasq, or a built binary
+    When the prerequisite is missing
+    Then the script prints "FAIL: ..." to stderr and exits with code 1
+    And never exits with code 0
+
+  Scenario: Test script naming follows convention
+    Given the workspace has integration test scripts
+    When the test scripts in tests/ are listed
+    Then each test script is named NNN-description.sh where NNN is a spec number
+    And helpers.sh is the only non-numbered .sh file in tests/
 ```

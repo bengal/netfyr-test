@@ -208,6 +208,18 @@ impl From<StateDiff> for varlink::StateDiff { ... }
 - SPEC-007 (Policy types)
 - SPEC-203 (StateDiff type)
 
+## Integration test infrastructure
+Integration tests are shell scripts in `tests/`. Each script uses `unshare --user --net` to create an unprivileged network namespace, starts the daemon, submits policies via `netfyr apply`, and verifies state via `netfyr query`. No root required.
+
+Shell test script rules (from SPEC-001):
+- **Naming**: `404-description.sh` — the Makefile discovers tests via `tests/[0-9]*.sh`.
+- **No skip**: if a prerequisite is missing (binary, `unshare`, `dnsmasq`), the script must `echo "FAIL: ..." >&2; exit 1`. Never `exit 0` on failure. Never wrap `netns_setup` or `start_dnsmasq` with `|| exit 0`.
+- **Binary path**: locate binaries via `SCRIPT_DIR/../target/debug/netfyr` and `SCRIPT_DIR/../target/debug/netfyr-daemon` (overridable with `NETFYR_BIN` and `NETFYR_DAEMON_BIN` env vars). Check with `[[ ! -x "$NETFYR_BIN" ]]` and `exit 1` if missing.
+- **Helpers**: source `tests/helpers.sh` which provides `netns_setup`, `create_veth`, `add_address`, `start_dnsmasq`, `cleanup`, and assertion functions.
+
+## Verification
+In addition to `cargo test` and `cargo clippy`, run `make integration-test` to execute all shell integration test scripts. All tests must pass. This is a required verification step — the story is not complete until shell tests pass.
+
 ## Acceptance criteria
 ```gherkin
 Feature: Varlink API definition
