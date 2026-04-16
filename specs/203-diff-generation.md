@@ -84,8 +84,14 @@ impl StateDiff {
 ### Diff algorithm (`src/diff.rs`)
 
 ```rust
-pub fn generate_diff(desired: &StateSet, actual: &StateSet) -> StateDiff;
+pub fn generate_diff(
+    desired: &StateSet,
+    actual: &StateSet,
+    managed_entities: &HashSet<EntityKey>,
+) -> StateDiff;
 ```
+
+The `managed_entities` set contains all entity keys that are explicitly targeted by at least one active policy (via its selector). This set is computed by the caller (the daemon's reconciler) from the full policy list — not from the produced states, since a policy may manage an entity before it produces any state (e.g., a DHCPv4 factory that hasn't acquired a lease yet). **Only managed entities can generate Remove operations.** Unmanaged entities in the system are left untouched.
 
 Algorithm:
 1. Build lookup maps for both StateSets keyed by `EntityKey` (entity_type + selector).
@@ -93,7 +99,8 @@ Algorithm:
    - Create a `DiffOperation` with `kind: Add`.
    - All fields become `FieldChange::Set { current: None, desired: value }`.
 3. **Removals**: For each entity in `actual` not in `desired`:
-   - Create a `DiffOperation` with `kind: Remove`.
+   - **Skip if the entity is not in `managed_entities`** — the entity is not managed by any policy and must be left as-is.
+   - If managed: create a `DiffOperation` with `kind: Remove`.
    - All fields become `FieldChange::Unset { current: value }`.
 4. **Modifications**: For each entity in both `desired` and `actual`:
    - Compare fields. Collect:
@@ -140,11 +147,13 @@ The text format uses:
 
 ### Edge cases
 
-- **Empty desired state**: All actual entities become Remove operations (everything is deleted).
+- **Empty desired state with managed entities**: Only managed entities become Remove operations. Unmanaged entities are ignored.
+- **Empty desired state with empty managed set**: No Remove operations at all — nothing is managed, so nothing is removed.
 - **Empty actual state**: All desired entities become Add operations (everything is new).
 - **Both empty**: Empty diff, `is_empty()` returns true.
 - **Identical states**: Empty diff, all entities listed in `unchanged_entities`.
 - **Read-only fields in actual but not in desired**: These are excluded from diff. Read-only fields (carrier, speed) are informational and not part of the desired state. They appear in query output but should not generate Modify operations.
+- **Unmanaged entities**: Entities present in the system but not targeted by any policy are completely invisible to the diff — they generate no operations and do not appear in `unchanged_entities`.
 
 ## Depends on
 - SPEC-004 (StateSet type, State, FieldValue comparison)
@@ -160,12 +169,21 @@ Feature: Diff generation between desired and actual state
     Then the StateDiff contains 1 operation with kind=Add for ethernet/eth0
     And the operation has field changes: mtu Set(None→1500), addresses Set(None→["10.0.1.50/24"])
 
-  Scenario: Entity exists in actual but not desired generates Remove
+  Scenario: Managed entity in actual but not desired generates Remove
     Given desired StateSet does not contain ethernet/eth0
     And actual StateSet contains ethernet/eth0 with mtu=1500, addresses=["10.0.1.50/24"]
+    And managed_entities contains ethernet/eth0
     When generate_diff is called
     Then the StateDiff contains 1 operation with kind=Remove for ethernet/eth0
     And the operation has field changes: mtu Unset(1500), addresses Unset(["10.0.1.50/24"])
+
+  Scenario: Unmanaged entity in actual but not desired is left alone
+    Given desired StateSet does not contain ethernet/eth1
+    And actual StateSet contains ethernet/eth1 with mtu=1500, operstate=up
+    And managed_entities does NOT contain ethernet/eth1
+    When generate_diff is called
+    Then the StateDiff contains no operations for ethernet/eth1
+    And ethernet/eth1 is not in unchanged_entities either (completely ignored)
 
   Scenario: Entity in both with different field values generates Modify
     Given desired ethernet/eth0 with mtu=9000, addresses=["10.0.1.50/24"]
@@ -195,19 +213,23 @@ Feature: Diff generation between desired and actual state
 
   Scenario: Multiple entities with mixed operations
     Given desired contains: ethernet/eth0 (mtu=9000), ethernet/eth2 (mtu=1500)
-    And actual contains: ethernet/eth0 (mtu=1500), ethernet/eth1 (mtu=1500)
+    And actual contains: ethernet/eth0 (mtu=1500), ethernet/eth1 (mtu=1500), ethernet/eth3 (mtu=1500)
+    And managed_entities contains ethernet/eth0, ethernet/eth1, ethernet/eth2
     When generate_diff is called
     Then the StateDiff has 3 operations:
       | kind   | entity        |
       | Modify | ethernet/eth0 |
       | Remove | ethernet/eth1 |
       | Add    | ethernet/eth2 |
+    And ethernet/eth3 is not in the diff (unmanaged)
 
-  Scenario: Empty desired state removes everything
+  Scenario: Empty desired state only removes managed entities
     Given desired StateSet is empty
-    And actual StateSet contains ethernet/eth0 and ethernet/eth1
+    And actual StateSet contains ethernet/eth0, ethernet/eth1, and ethernet/eth2
+    And managed_entities contains only ethernet/eth0 and ethernet/eth1
     When generate_diff is called
-    Then the StateDiff has 2 Remove operations
+    Then the StateDiff has 2 Remove operations (eth0 and eth1)
+    And ethernet/eth2 is not in the diff (unmanaged)
 
   Scenario: Empty actual state adds everything
     Given desired StateSet contains ethernet/eth0 and ethernet/eth1

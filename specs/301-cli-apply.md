@@ -223,7 +223,7 @@ async fn run_apply_daemon(
 - SPEC-404 (Varlink API for daemon mode)
 
 ## Integration test infrastructure
-Integration tests use `netfyr-test-utils` (SPEC-001) to create unprivileged user + network namespaces. Tests create veth pairs, write YAML policy files to temp directories, and invoke `netfyr apply` as a subprocess, then verify the kernel state changed. No root required.
+Integration tests are shell scripts in `tests/` (see SPEC-001). Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs, writes YAML policy files, runs `netfyr apply`, and verifies the kernel state with `ip` commands. No root required.
 
 ## Acceptance criteria
 ```gherkin
@@ -347,25 +347,25 @@ Feature: netfyr apply CLI command (daemon mode)
     And the eth1 policy is removed
     And reconciliation re-runs (eth1 state may be cleaned up)
 
-Feature: Integration tests for CLI apply (unprivileged netns)
-  Scenario: Apply static policy in unprivileged namespace
-    Given an unprivileged user + network namespace with a veth pair "veth-test0"/"veth-test1"
-    And "veth-test0" has default mtu 1500
+Feature: Integration tests for CLI apply (shell scripts)
+  Scenario: Apply static policy in namespace
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair "veth-test0"/"veth-test1" with default mtu 1500
     And a YAML file defining ethernet "veth-test0" with mtu=1400
-    When "netfyr apply" is run as a subprocess inside the namespace
+    When `netfyr apply policy.yaml` is run
     Then the exit code is 0
-    And querying "veth-test0" via netlink shows mtu=1400
+    And `ip link show veth-test0` shows mtu 1400
 
-  Scenario: Apply with address in unprivileged namespace
-    Given an unprivileged namespace with a veth pair "veth-test0"/"veth-test1"
+  Scenario: Apply with address in namespace
+    Given a namespace with a veth pair "veth-test0"/"veth-test1"
     And a YAML file defining ethernet "veth-test0" with mtu=1400 and addresses=["10.99.0.1/24"]
-    When "netfyr apply" is run inside the namespace
+    When `netfyr apply policy.yaml` is run
     Then the exit code is 0
-    And "veth-test0" has address "10.99.0.1/24"
+    And `ip addr show veth-test0` includes "10.99.0.1/24"
 
   Scenario: Dry-run does not change state in namespace
-    Given an unprivileged namespace with a veth pair "veth-test0" at mtu 1500
+    Given a namespace with a veth pair "veth-test0" at mtu 1500
     And a YAML file defining mtu=1400
-    When "netfyr apply --dry-run" is run inside the namespace
-    Then "veth-test0" still has mtu 1500
+    When `netfyr apply --dry-run policy.yaml` is run
+    Then `ip link show veth-test0` still shows mtu 1500
 ```

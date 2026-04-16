@@ -85,7 +85,7 @@ All fields returned from a kernel query are tagged with `Provenance::KernelDefau
 - SPEC-101 (NetworkBackend trait that this implements)
 
 ## Integration test infrastructure
-Integration tests use `netfyr-test-utils` (SPEC-001) to create unprivileged user + network namespaces. Each test creates a veth pair inside the namespace, configures known state (addresses, MTU) via direct netlink calls, then runs the query function and verifies the returned `StateSet` matches expectations. No root required.
+Integration tests are shell scripts in `tests/` (see SPEC-001). Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs with known configuration via `ip` commands, runs `netfyr query` as a subprocess, and verifies the output. No root required.
 
 ## Acceptance criteria
 ```gherkin
@@ -162,25 +162,21 @@ Feature: Query ethernet interfaces via rtnetlink
     Then the result includes all ethernet interfaces on the system
     And each has the same fields as an individual query would return
 
-Feature: Integration tests for ethernet query (unprivileged netns)
-  Scenario: Query veth interface in unprivileged namespace
-    Given an unprivileged user + network namespace created via netfyr-test-utils
-    And a veth pair "veth-test0"/"veth-test1" created inside the namespace
-    And "veth-test0" is set to link up with mtu 1400 and address "10.99.0.1/24"
-    When query is called with entity_type "ethernet" and selector name="veth-test0" inside the namespace
-    Then the result contains one entity with name "veth-test0"
-    And the entity has mtu=1400
-    And the entity has addresses containing "10.99.0.1/24"
-    And all fields have provenance KernelDefault
+Feature: Integration tests for ethernet query (shell scripts)
+  Scenario: Query veth interface in namespace
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair "veth-test0"/"veth-test1" with "veth-test0" at mtu 1400 and address "10.99.0.1/24"
+    When `netfyr query ethernet --selector name=veth-test0` is run
+    Then the output shows veth-test0 with mtu=1400 and address 10.99.0.1/24
 
   Scenario: Query returns both ends of a veth pair
-    Given an unprivileged namespace with a veth pair "veth-a"/"veth-b"
-    When query is called with entity_type "ethernet" and no selector inside the namespace
-    Then the result contains at least 2 entities (veth-a and veth-b)
+    Given a namespace with a veth pair "veth-a"/"veth-b"
+    When `netfyr query ethernet` is run
+    Then the output includes both veth-a and veth-b
 
   Scenario: Query by MAC address in namespace
-    Given an unprivileged namespace with a veth pair
-    And the MAC address of "veth-test0" is noted
-    When query is called with a selector matching that MAC address
-    Then the result contains exactly one entity with name "veth-test0"
+    Given a namespace with a veth pair
+    And the MAC address of "veth-test0" is captured via `ip link show`
+    When `netfyr query ethernet --selector mac=$MAC` is run
+    Then the output contains exactly veth-test0
 ```

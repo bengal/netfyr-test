@@ -277,17 +277,16 @@ Feature: Varlink API definition
     Then succeeded=2, failed=1, skipped=0
     And the conflict entry preserves entity, field, policies, and values
 
-Feature: Integration tests for Varlink API
-  Scenario: Full round-trip in unprivileged namespace
-    Given an unprivileged user + network namespace with a veth pair
-    And the daemon is started inside the namespace listening on a temp socket
-    When the client connects and submits a static policy setting mtu=1400
-    Then the submit_policies call returns an ApplyReport
-    And querying the interface via the client shows mtu=1400
+Feature: Integration tests for Varlink API (shell scripts)
+  Scenario: Full round-trip in namespace
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair and the daemon started inside the namespace
+    When `netfyr apply policy.yaml` is run with a static policy setting mtu=1400
+    Then `netfyr query -s name=veth-test0` shows mtu=1400
+    And `ip link show veth-test0` confirms mtu 1400
 
   Scenario: Replace-all semantics via Varlink
     Given the daemon is running in a namespace with policy A (mtu=1400)
-    When the client submits policy B (mtu=1300)
-    Then policy A is removed
-    And the interface mtu is 1300
+    When `netfyr apply policy-b.yaml` is run with policy B (mtu=1300)
+    Then `ip link show veth-test0` shows mtu 1300
 ```

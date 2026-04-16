@@ -187,7 +187,7 @@ Multiple `--selector` flags are combined with AND logic. Invalid keys are reject
 - SPEC-404 (Varlink API for daemon mode)
 
 ## Integration test infrastructure
-Integration tests use `netfyr-test-utils` (SPEC-001) to create unprivileged user + network namespaces. Tests create veth pairs with known configuration, invoke `netfyr query` as a subprocess, and verify the output matches the expected state. No root required.
+Integration tests are shell scripts in `tests/` (see SPEC-001). Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs with known configuration via `ip` commands, runs `netfyr query`, and verifies the output. No root required.
 
 ## Acceptance criteria
 ```gherkin
@@ -275,25 +275,23 @@ Feature: netfyr query CLI command (daemon mode)
     When the user runs "netfyr query --selector name=eth0"
     Then the output includes DHCP-acquired addresses and routes
 
-Feature: Integration tests for CLI query (unprivileged netns)
-  Scenario: Query veth interface in unprivileged namespace
-    Given an unprivileged user + network namespace with a veth pair "veth-test0"/"veth-test1"
-    And "veth-test0" is set to link up with mtu 1400 and address "10.99.0.1/24"
-    When "netfyr query -s name=veth-test0 -o json" is run inside the namespace
+Feature: Integration tests for CLI query (shell scripts)
+  Scenario: Query veth interface in namespace
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair "veth-test0"/"veth-test1" with "veth-test0" at mtu 1400 and address "10.99.0.1/24"
+    When `netfyr query -s name=veth-test0 -o json` is run
     Then the exit code is 0
     And the JSON output contains one entity with name "veth-test0"
-    And the entity has mtu=1400
-    And the entity has addresses containing "10.99.0.1/24"
+    And the entity has mtu=1400 and addresses containing "10.99.0.1/24"
 
   Scenario: Query all interfaces in namespace returns both veth ends
-    Given an unprivileged namespace with a veth pair "veth-test0"/"veth-test1"
-    When "netfyr query -o json" is run inside the namespace
+    Given a namespace with a veth pair "veth-test0"/"veth-test1"
+    When `netfyr query -o json` is run
     Then the JSON output contains at least 2 entities
 
   Scenario: Query with YAML output in namespace
-    Given an unprivileged namespace with a veth pair "veth-test0"/"veth-test1"
-    And "veth-test0" has mtu 1400
-    When "netfyr query -s name=veth-test0" is run inside the namespace
+    Given a namespace with a veth pair "veth-test0"/"veth-test1" with "veth-test0" at mtu 1400
+    When `netfyr query -s name=veth-test0` is run
     Then the output is valid YAML
     And it contains "mtu: 1400"
 ```

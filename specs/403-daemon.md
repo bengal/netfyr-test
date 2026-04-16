@@ -138,13 +138,14 @@ impl Reconciler {
 
 The reconciliation flow inside `reconcile_and_apply`:
 1. Collect static policy states via `produce_all_static()`.
-2. Collect factory-produced states from `factory_manager.produced_states()`.
+2. Collect factory-produced states from `factory_manager.produced_states()`. Note: DHCPv4 factories that haven't acquired a lease yet still produce a pending state with `operstate: up` (see SPEC-401).
 3. Merge all into `Vec<PolicyInput>`.
 4. Run reconciliation engine (SPEC-201) to get effective state.
-5. Query actual system state via backend.
-6. Generate diff (SPEC-203).
-7. Apply diff via backend (SPEC-103).
-8. Return `ApplyResult` with report.
+5. **Compute managed entities**: build a `HashSet<EntityKey>` from the selectors of all policies in the policy store. This includes entities targeted by DHCP policies even if no lease exists yet.
+6. Query actual system state via backend.
+7. Generate diff via `generate_diff(desired, actual, managed_entities)` (SPEC-203). Only managed entities can be removed; unmanaged system entities are left untouched.
+8. Apply diff via backend (SPEC-103).
+9. Return `ApplyResult` with report.
 
 ### Event loop (`src/server.rs`)
 
@@ -279,7 +280,7 @@ On `SIGTERM` (systemd stop):
 - SPEC-404 (Varlink API)
 
 ## Integration test infrastructure
-Integration tests use `netfyr-test-utils` (SPEC-001) to create unprivileged user + network namespaces. Tests start the daemon as a subprocess inside the namespace, submit policies via Varlink, and verify the kernel state. No root required.
+Integration tests are shell scripts in `tests/` (see SPEC-001). Each script uses `unshare --user --net` to create an unprivileged network namespace, starts the daemon as a subprocess, submits policies via `netfyr apply`, and verifies the kernel state with `ip` commands. No root required.
 
 ## Acceptance criteria
 ```gherkin
@@ -314,7 +315,9 @@ Feature: Policy submission
     Given the daemon is running with no policies
     When SubmitPolicies is called with a DHCPv4 policy for eth0
     Then a Dhcpv4Factory is started for eth0
-    And once a lease is acquired, reconciliation runs
+    And the factory immediately produces a pending state with operstate=up
+    And reconciliation runs, bringing eth0 up (so DHCP discovery can proceed)
+    And once a lease is acquired, re-reconciliation applies the full DHCP state
 
   Scenario: Submit policies stops removed DHCP factories
     Given the daemon is running with a DHCPv4 policy for eth0
@@ -362,26 +365,35 @@ Feature: Query via daemon
     Then the response includes 3 active policies
     And 1 running factory with its status
 
-Feature: Integration tests for daemon (unprivileged netns)
+Feature: Integration tests for daemon (shell scripts)
   Scenario: Daemon applies static policy in namespace
-    Given an unprivileged user + network namespace with a veth pair "veth-test0"/"veth-test1"
-    And the daemon is started inside the namespace
-    When a static policy setting veth-test0 mtu=1400 is submitted via Varlink
-    Then the daemon applies the change
-    And querying veth-test0 via netlink shows mtu=1400
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair "veth-test0"/"veth-test1"
+    And the daemon is started as a background process inside the namespace
+    When `netfyr apply policy.yaml` is run with a policy setting veth-test0 mtu=1400
+    Then `ip link show veth-test0` shows mtu 1400
 
   Scenario: Daemon handles DHCP policy in namespace
-    Given an unprivileged namespace with a veth pair "veth-dhcp0"/"veth-dhcp1"
+    Given a namespace with a veth pair "veth-dhcp0"/"veth-dhcp1"
+    And "veth-dhcp1" has address "10.99.0.1/24" and is link up
     And dnsmasq is running on "veth-dhcp1" serving 10.99.0.100-10.99.0.200
     And the daemon is started inside the namespace
-    When a DHCPv4 policy for "veth-dhcp0" is submitted
-    Then the daemon starts a DHCP factory
-    And a lease is acquired within 10 seconds
-    And "veth-dhcp0" has an address in the range 10.99.0.100-10.99.0.200
+    When `netfyr apply dhcp-policy.yaml` is run with a DHCPv4 policy for "veth-dhcp0"
+    And the script waits up to 10 seconds for a lease
+    Then `ip addr show veth-dhcp0` includes an address in the range 10.99.0.0/24
+    And `ip link show veth-dhcp0` shows UP
+
+  Scenario: DHCP policy does not tear down other interfaces
+    Given a namespace with veth pairs "veth-dhcp0"/"veth-dhcp1" and "veth-other0"/"veth-other1"
+    And "veth-other0" is link up with mtu=1400
+    And dnsmasq is running on "veth-dhcp1"
+    And the daemon is started inside the namespace
+    When `netfyr apply dhcp-policy.yaml` is run with only a DHCPv4 policy for "veth-dhcp0"
+    Then `ip link show veth-other0` still shows UP and mtu 1400 (unmanaged, untouched)
+    And "veth-dhcp0" acquires a DHCP lease
 
   Scenario: Replace-all removes old policies in namespace
     Given the daemon is running in a namespace with a policy for veth-test0 (mtu=1400)
-    When a new policy set for veth-test0 (mtu=1300) is submitted
-    Then veth-test0 mtu changes from 1400 to 1300
-    And only the new policy exists in the daemon's state
+    When `netfyr apply new-policy.yaml` is run with veth-test0 mtu=1300
+    Then `ip link show veth-test0` shows mtu 1300
 ```

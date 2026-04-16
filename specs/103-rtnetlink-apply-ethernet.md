@@ -81,7 +81,7 @@ When modifying an entity, field changes are applied in a specific order:
 - SPEC-102 (NetlinkBackend struct and query infrastructure that apply builds upon)
 
 ## Integration test infrastructure
-Integration tests use `netfyr-test-utils` (SPEC-001) to create unprivileged user + network namespaces with veth pairs. Tests apply a `StateDiff` via the backend, then query the kernel to verify the changes took effect. No root required.
+Integration tests are shell scripts in `tests/` (see SPEC-001). Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up veth pairs, runs `netfyr apply` with YAML policies, and verifies the result with `ip` commands. No root required.
 
 ## Acceptance criteria
 ```gherkin
@@ -193,35 +193,32 @@ Feature: Apply ethernet configuration via rtnetlink
     Then the ApplyReport has 1 failed operation
     And the error is BackendError::PermissionDenied
 
-Feature: Integration tests for ethernet apply (unprivileged netns)
+Feature: Integration tests for ethernet apply (shell scripts)
   Scenario: Set MTU on a veth interface in namespace
-    Given an unprivileged namespace with a veth pair "veth-test0"/"veth-test1"
-    And "veth-test0" has default mtu 1500
-    And a StateDiff with a Modify operation setting mtu to 1400
-    When apply is called inside the namespace
-    Then the ApplyReport has 1 succeeded operation
-    And querying "veth-test0" shows mtu=1400
+    Given a shell script running inside `unshare --user --net`
+    And a veth pair "veth-test0"/"veth-test1" with default mtu 1500
+    And a YAML policy setting veth-test0 mtu to 1400
+    When `netfyr apply policy.yaml` is run
+    Then `ip link show veth-test0` shows mtu 1400
 
   Scenario: Add and remove IP addresses in namespace
-    Given an unprivileged namespace with a veth pair
-    And "veth-test0" has no addresses
-    And a StateDiff adding address "10.99.0.1/24"
-    When apply is called inside the namespace
-    Then the address "10.99.0.1/24" is present on "veth-test0"
-    When a second StateDiff removing address "10.99.0.1/24" is applied
-    Then the address is no longer present on "veth-test0"
+    Given a namespace with a veth pair "veth-test0"/"veth-test1"
+    And a YAML policy adding address "10.99.0.1/24" to veth-test0
+    When `netfyr apply policy.yaml` is run
+    Then `ip addr show veth-test0` includes "10.99.0.1/24"
+    When a second policy without the address is applied
+    Then "10.99.0.1/24" is no longer present on veth-test0
 
   Scenario: Add a route in namespace
-    Given an unprivileged namespace with a veth pair
-    And "veth-test0" has address "10.99.0.1/24" and is link up
-    And a StateDiff adding route destination="10.100.0.0/24" gateway="10.99.0.2"
-    When apply is called inside the namespace
-    Then the route exists in the namespace routing table
+    Given a namespace with a veth pair and veth-test0 at "10.99.0.1/24" link up
+    And a YAML policy adding route "10.100.0.0/24 via 10.99.0.2" to veth-test0
+    When `netfyr apply policy.yaml` is run
+    Then `ip route` shows the route in the namespace routing table
 
   Scenario: Full round-trip: apply then query
-    Given an unprivileged namespace with a veth pair "veth-test0"/"veth-test1"
-    And a StateDiff setting mtu=1400 and adding address "10.99.0.1/24"
-    When apply is called inside the namespace
-    And query is called for "veth-test0"
-    Then the queried state shows mtu=1400 and addresses containing "10.99.0.1/24"
+    Given a namespace with a veth pair "veth-test0"/"veth-test1"
+    And a YAML policy setting mtu=1400 and address "10.99.0.1/24"
+    When `netfyr apply policy.yaml` is run
+    And `netfyr query ethernet --selector name=veth-test0` is run
+    Then the query output shows mtu=1400 and address "10.99.0.1/24"
 ```
