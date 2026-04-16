@@ -36,7 +36,44 @@ Start the daemon with: systemctl start netfyr
 ## Implementation details
 - Crate: `netfyr-backend`
 - Files: `src/dhcp/mod.rs`, `src/dhcp/client.rs`, `src/dhcp/lease.rs`
-- Dependencies (external crates): `dhcpv4` or raw socket implementation, `tokio` (async runtime)
+- Dependencies (external crates): `dhcproto` (DHCP message encoding/decoding), `socket2` (raw socket construction), `tokio` (async runtime)
+
+### Dual-socket architecture
+
+The DHCP client uses two socket types at different phases of the lease lifecycle, following the same design as production DHCP clients (n-dhcp4, dhclient, NetworkManager). This is a hard requirement, not an optimization.
+
+**Why two sockets**: A DHCP client has no IP address when it starts. The Linux kernel's UDP stack will not deliver broadcast UDP packets to a socket bound to an interface that has no IP address assigned. This is standard kernel behavior. Using `AF_INET`/`SOCK_DGRAM` (a regular UDP socket) for the initial exchange will silently fail — the DISCOVER is sent but the OFFER never arrives at the application. The integration tests (which run in user namespaces with veth pairs) will hang indefinitely.
+
+**Packet socket** (`AF_PACKET`/`SOCK_DGRAM`/`ETH_P_IP`) — used before the client has an IP:
+- Use `SOCK_DGRAM` (not `SOCK_RAW`): the kernel strips/adds Ethernet headers automatically, so the application only constructs IP+UDP headers, not Ethernet frames. This is simpler and works with any link layer.
+- Bind to the target interface via `struct sockaddr_ll` with `sll_protocol = ETH_P_IP` and `sll_ifindex`.
+- **Sending**: construct a raw IP+UDP+DHCP payload. Build the IP header (src `0.0.0.0`, dst `255.255.255.255`, protocol UDP, DF flag) and UDP header (src port 68, dst port 67) manually. Compute IP header checksum and UDP checksum (including pseudo-header) per RFC 1071. Send via `sendmsg()` with destination set to broadcast MAC (`ff:ff:ff:ff:ff:ff`).
+- **Receiving**: read IP+UDP+DHCP payload. Parse the IP header to find IHL, then extract the UDP header and DHCP message. Validate IP and UDP checksums. Filter in userspace: drop packets that are not UDP, are fragmented, have destination port != 68, have DHCP op != BOOTREPLY (2), or have an invalid magic cookie (`0x63825363`).
+
+**UDP socket** (`AF_INET`/`SOCK_DGRAM`) — used after lease acquisition for renewals:
+- Bind to the acquired client IP on port 68, connected to the server IP on port 67.
+- Use `SO_BINDTODEVICE` to restrict to the interface.
+- Used for T1 unicast renewals (simple `send()`) and T2 broadcast rebinding.
+
+**Socket transition** (packet → UDP):
+When the client receives a DHCPACK and the lease is accepted:
+1. Create the UDP socket bound to the new client IP.
+2. Drain remaining packets from the packet socket (packets may have been in-flight).
+3. Close the packet socket.
+4. Switch to UDP mode for all subsequent communication.
+
+If the lease is lost (NAK, expiration, decline), tear down the UDP socket and create a fresh packet socket to restart discovery.
+
+The `dhcproto` crate handles DHCP message encoding/decoding. The IP+UDP framing must be implemented directly (20-byte IP header + 8-byte UDP header + checksums).
+
+### sysfs is not namespace-aware
+
+Code that needs to discover interface properties (MAC address, interface existence) MUST use netlink (via the `rtnetlink` crate), never `/sys/class/net/`. The sysfs filesystem is not namespace-aware: inside a user namespace created with `unshare --user --net`, `/sys/class/net/` shows the host's interfaces, not the namespace's interfaces. This applies everywhere in `netfyr-backend`, not just the DHCP client.
+
+Specifically:
+- **MAC address**: query via `rtnetlink` `LinkGet` and extract `LinkAttribute::Address`.
+- **Interface existence**: query via `rtnetlink` `LinkGet` filtered by name.
+- **Never** read `/sys/class/net/<iface>/address` or check `Path::new("/sys/class/net/<iface>").exists()`.
 
 ### Factory interface
 
@@ -84,14 +121,14 @@ impl Dhcpv4Factory {
 
 ### Lease lifecycle
 
-1. **Discover**: Send DHCPDISCOVER broadcast on the interface.
-2. **Offer**: Receive DHCPOFFER from a server.
-3. **Request**: Send DHCPREQUEST for the offered address.
-4. **Acknowledge**: Receive DHCPACK. Lease is now active.
-5. **Renew** (at T1, typically 50% of lease time): Send unicast DHCPREQUEST to the server.
-6. **Rebind** (at T2, typically 87.5% of lease time): Send broadcast DHCPREQUEST.
-7. **Expire**: If no response by lease end, lease expires. Send LeaseExpired event.
-8. **Release**: On stop(), send DHCPRELEASE to the server.
+1. **Discover** (packet socket): Send DHCPDISCOVER broadcast. Source IP `0.0.0.0`, destination `255.255.255.255`.
+2. **Offer** (packet socket): Receive DHCPOFFER from a server.
+3. **Request** (packet socket): Send DHCPREQUEST for the offered address (broadcast).
+4. **Acknowledge** (packet socket): Receive DHCPACK. Lease is now active. Transition: drain packet socket, create UDP socket bound to the acquired IP, close packet socket.
+5. **Renew** (UDP socket, at T1, typically 50% of lease time): Send unicast DHCPREQUEST to the server.
+6. **Rebind** (UDP socket, at T2, typically 87.5% of lease time): Send broadcast DHCPREQUEST.
+7. **Expire**: If no response by lease end, lease expires. Send LeaseExpired event. Tear down UDP socket, create fresh packet socket, restart from step 1.
+8. **Release**: On stop(), send DHCPRELEASE to the server via UDP socket.
 
 ### Pending state (before lease)
 
@@ -215,6 +252,20 @@ The daemon (SPEC-403) manages factory lifecycles:
 
 ## Integration test infrastructure
 Integration tests are shell scripts in `tests/`. Each script uses `unshare --user --net` to create an unprivileged network namespace, sets up a veth pair, starts dnsmasq on one end, submits a DHCPv4 policy via `netfyr apply`, and verifies the lease with `ip addr show`. No root required.
+
+### DHCP test topology
+
+DHCP tests use a veth pair inside a single user namespace: `veth-dhcp0` (client side) ↔ `veth-dhcp1` (server side). dnsmasq runs on `veth-dhcp1` and the netfyr DHCP client runs on `veth-dhcp0`. Both processes share the same namespace.
+
+This topology works correctly because:
+1. The DHCP client uses a packet socket (`AF_PACKET`/`SOCK_DGRAM`) which receives IP packets on the bound interface regardless of whether the interface has an IP address.
+2. dnsmasq uses `--bind-dynamic` (not `--bind-interfaces`) so it can receive broadcast DHCP packets.
+
+This topology will NOT work with a regular UDP socket (`AF_INET`/`SOCK_DGRAM`) DHCP client, because the Linux kernel does not deliver broadcast UDP packets to a socket on an interface that has no IP address. If the DHCP client uses UDP sockets, the integration tests will hang waiting for a lease that never arrives.
+
+### Reconciler must not remove unmanaged interfaces
+
+When the daemon reconciles desired state against actual state, it MUST NOT generate `Remove` operations for interfaces that have no policy. Only interfaces that appear in the effective desired state (from policies or factory-produced states) should be diffed. Interfaces that exist in the system but are not mentioned in any policy must be left completely untouched. This is critical for DHCP tests where the server-side interface (`veth-dhcp1`) must remain UP — tearing it down kills the DHCP server.
 
 Shell test script rules (from SPEC-001):
 - **Naming**: `401-description.sh` — the Makefile discovers tests via `tests/[0-9]*.sh`.

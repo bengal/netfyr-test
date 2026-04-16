@@ -11,7 +11,7 @@ The CLI automatically detects which mode to use:
 
 2. **Daemon mode** (daemon running): The CLI loads policies from YAML files and submits them to the daemon via Varlink (SPEC-404). The daemon reconciles all policies (static + DHCP), applies the effective state, and returns the result. Replace-all semantics: each `netfyr apply` replaces the daemon's entire policy set.
 
-Mode detection: the CLI attempts to connect to the Varlink socket at `/run/netfyr/netfyr.sock`. If the connection succeeds, daemon mode is used. If it fails (socket not found or connection refused), daemon-free mode is used.
+Mode detection: the CLI reads the socket path from the `NETFYR_SOCKET_PATH` environment variable, defaulting to `/run/netfyr/netfyr.sock` if unset. It attempts to connect to that socket. If the connection succeeds, daemon mode is used. If it fails (socket not found or connection refused), daemon-free mode is used. The environment variable override is essential for integration tests, which run in user namespaces where `/run/netfyr/` is not writable.
 
 ## Why
 `netfyr apply` is the primary user-facing command and the core workflow. It implements a simple mental model: "make the system look like this." The two-mode design keeps simple cases simple (no daemon needed for static configs on servers) while supporting dynamic factories (DHCP) when the daemon is running. The auto-detection means users always run the same command -- `netfyr apply` does the right thing.
@@ -121,7 +121,9 @@ pub async fn run_apply(args: ApplyArgs) -> Result<ExitCode> {
     let policy_set = load_policies(&args.paths)?;
 
     // 2. Detect mode: try connecting to daemon via Varlink
-    if let Ok(client) = varlink_connect("/run/netfyr/netfyr.sock") {
+    let socket_path = std::env::var("NETFYR_SOCKET_PATH")
+        .unwrap_or_else(|_| "/run/netfyr/netfyr.sock".to_string());
+    if let Ok(client) = varlink_connect(&socket_path) {
         // Daemon mode
         return run_apply_daemon(client, policy_set, args.dry_run).await;
     }

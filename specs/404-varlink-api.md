@@ -152,9 +152,11 @@ impl VarlinkClient {
 
 ### Socket path
 
-The Varlink socket is located at `/run/netfyr/netfyr.sock`. This path is:
+The default Varlink socket path is `/run/netfyr/netfyr.sock`. Both the daemon and CLI read the `NETFYR_SOCKET_PATH` environment variable to override this path (see SPEC-403 for daemon, SPEC-301/302 for CLI). The override is essential for integration tests, which run in user namespaces where `/run/netfyr/` is not writable.
+
+The socket is:
 - Created by the daemon on startup, or by systemd socket activation.
-- Used by the CLI for auto-detection: if `connect("/run/netfyr/netfyr.sock")` succeeds, daemon mode is used.
+- Used by the CLI for auto-detection: if `connect(socket_path)` succeeds, daemon mode is used.
 - Cleaned up when the daemon shuts down (or by systemd).
 
 ### Method semantics

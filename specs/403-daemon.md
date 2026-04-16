@@ -30,6 +30,15 @@ sudo systemctl stop netfyr
 - Files: `src/main.rs`, `src/server.rs`, `src/factory_manager.rs`, `src/reconciler.rs`
 - Dependencies (external crates): `tokio` (async runtime), `varlink` (Varlink server), `anyhow` (error handling), `tracing` (structured logging)
 
+### Environment variables
+
+The daemon reads these environment variables to allow overriding default paths (essential for integration tests which run in user namespaces where system paths are not writable):
+
+| Variable | Default | Description |
+|---|---|---|
+| `NETFYR_SOCKET_PATH` | `/run/netfyr/netfyr.sock` | Varlink socket path |
+| `NETFYR_POLICY_DIR` | `/var/lib/netfyr/policies/` | Persistent policy storage directory |
+
 ### Daemon startup flow
 
 ```rust
@@ -38,26 +47,32 @@ async fn main() -> Result<()> {
     // 1. Initialize logging
     tracing_subscriber::init();
 
-    // 2. Create the Varlink socket directory
-    ensure_socket_dir("/run/netfyr/")?;
+    // 2. Read paths from environment (with defaults for production)
+    let socket_path = std::env::var("NETFYR_SOCKET_PATH")
+        .unwrap_or_else(|_| "/run/netfyr/netfyr.sock".to_string());
+    let policy_dir = std::env::var("NETFYR_POLICY_DIR")
+        .unwrap_or_else(|_| "/var/lib/netfyr/policies/".to_string());
 
-    // 3. Load persisted policies from disk
-    let policy_store = PolicyStore::load("/var/lib/netfyr/policies/")?;
+    // 3. Create the socket directory
+    ensure_socket_dir(Path::new(&socket_path).parent().unwrap())?;
 
-    // 4. Start DHCP factories for any DHCPv4 policies
+    // 4. Load persisted policies from disk
+    let policy_store = PolicyStore::load(&policy_dir)?;
+
+    // 5. Start DHCP factories for any DHCPv4 policies
     let factory_manager = FactoryManager::new();
     factory_manager.start_factories(&policy_store.policies()).await?;
 
-    // 5. Run initial reconciliation and apply
+    // 6. Run initial reconciliation and apply
     let reconciler = Reconciler::new();
     reconciler.reconcile_and_apply(&policy_store, &factory_manager).await?;
 
-    // 6. Notify systemd that we're ready
+    // 7. Notify systemd that we're ready
     sd_notify::notify(true, &[sd_notify::NotifyState::Ready])?;
 
-    // 7. Start Varlink server and factory event loop
+    // 8. Start Varlink server and factory event loop
     tokio::select! {
-        result = serve_varlink("/run/netfyr/netfyr.sock", policy_store, factory_manager, reconciler) => {
+        result = serve_varlink(&socket_path, policy_store, factory_manager, reconciler) => {
             result?;
         }
         _ = tokio::signal::ctrl_c() => {

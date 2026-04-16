@@ -9,7 +9,7 @@ Implement the `netfyr query [--selector key=value]... [--output yaml|json]` CLI 
 
 2. **Daemon mode** (daemon running): The CLI queries the daemon via Varlink (SPEC-404). The daemon returns the current state, which may include DHCP-acquired configuration.
 
-Mode detection: the CLI attempts to connect to the Varlink socket at `/run/netfyr/netfyr.sock`. If the connection succeeds, daemon mode is used. If it fails, daemon-free mode is used.
+Mode detection: the CLI reads the socket path from the `NETFYR_SOCKET_PATH` environment variable, defaulting to `/run/netfyr/netfyr.sock` if unset. It attempts to connect to that socket. If the connection succeeds, daemon mode is used. If it fails, daemon-free mode is used.
 
 ## Why
 Querying the current system state is essential for operators to understand what is currently configured, debug issues, and verify that apply operations had the expected effect. The query command is the primary inspection tool. YAML and JSON output formats support both human reading and programmatic consumption (piping to `jq`, `yq`, etc.). Using `--selector` for all filtering (including entity type) keeps the CLI simple and uniform — `type` is just another filter dimension alongside `name`, `driver`, and `mac`.
@@ -119,7 +119,9 @@ pub async fn run_query(args: QueryArgs) -> Result<ExitCode> {
     let (entity_type, selector) = extract_type_and_selector(&args.selector)?;
 
     // 2. Detect mode: try connecting to daemon via Varlink
-    if let Ok(client) = varlink_connect("/run/netfyr/netfyr.sock") {
+    let socket_path = std::env::var("NETFYR_SOCKET_PATH")
+        .unwrap_or_else(|_| "/run/netfyr/netfyr.sock".to_string());
+    if let Ok(client) = varlink_connect(&socket_path) {
         return run_query_daemon(client, entity_type.as_ref(), selector.as_ref(), &args.output).await;
     }
 

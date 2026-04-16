@@ -131,7 +131,7 @@ Test scripts locate the `netfyr` and `netfyr-daemon` binaries relative to the sc
 - **`netns_setup`** -- Runs the rest of the script inside a new user + network namespace via `unshare --user --net`. Exits with code 1 if `unshare` is not available.
 - **`create_veth VETH0 VETH1`** -- Creates a veth pair, brings both ends up.
 - **`add_address IFACE CIDR`** -- Adds an IP address to an interface.
-- **`start_dnsmasq IFACE SERVER_IP RANGE_START RANGE_END LEASE_TIME`** -- Starts a dnsmasq DHCP server on the given interface. Exits with code 1 if `dnsmasq` is not installed. Stores the PID for cleanup.
+- **`start_dnsmasq IFACE SERVER_IP RANGE_START RANGE_END LEASE_TIME`** -- Starts a dnsmasq DHCP server on the given interface. Uses `--bind-dynamic` (not `--bind-interfaces`) so that dnsmasq can receive broadcast DHCP packets on the interface. Writes leases to a temp file via `--dhcp-leasefile`. Exits with code 1 if `dnsmasq` is not installed. Stores the PID for cleanup.
 - **`cleanup`** -- Kills dnsmasq and cleans up. Registered as a `trap EXIT` handler.
 - **`assert_eq`, `assert_match`, `assert_has_address`, `assert_link_up`** -- Test assertion helpers.
 
