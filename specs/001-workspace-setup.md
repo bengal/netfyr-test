@@ -132,7 +132,7 @@ Test scripts locate the `netfyr` and `netfyr-daemon` binaries relative to the sc
 - **`create_veth VETH0 VETH1`** -- Creates a veth pair, brings both ends up.
 - **`add_address IFACE CIDR`** -- Adds an IP address to an interface.
 - **`start_dnsmasq IFACE SERVER_IP RANGE_START RANGE_END LEASE_TIME`** -- Starts a dnsmasq DHCP server on the given interface. Uses `--bind-dynamic` (not `--bind-interfaces`) so that dnsmasq can receive broadcast DHCP packets on the interface. Writes leases to a temp file via `--dhcp-leasefile`. Exits with code 1 if `dnsmasq` is not installed. Stores the PID for cleanup.
-- **`cleanup`** -- Kills dnsmasq and cleans up. Registered as a `trap EXIT` handler.
+- **`cleanup`** -- Kills dnsmasq processes tracked by `start_dnsmasq` and cleans up. Registered as a `trap EXIT` handler by `netns_setup`. **Important:** test scripts that set their own `trap '...' EXIT` must call `cleanup` within the trap body, because setting a new trap overwrites the previous one.
 - **`assert_eq`, `assert_match`, `assert_has_address`, `assert_link_up`** -- Test assertion helpers.
 
 **Example test script** (`tests/401-dhcpv4-lease.sh`):
@@ -165,7 +165,7 @@ add_address veth-dhcp1 10.99.0.1/24
 start_dnsmasq veth-dhcp1 10.99.0.1 10.99.0.100 10.99.0.200 120
 
 TMPDIR_TEST=$(mktemp -d)
-trap 'kill "${DAEMON_PID:-}" 2>/dev/null; rm -rf "$TMPDIR_TEST"' EXIT
+trap 'kill "${DAEMON_PID:-}" 2>/dev/null; cleanup; rm -rf "$TMPDIR_TEST"' EXIT
 
 SOCKET_PATH="$TMPDIR_TEST/netfyr.sock"
 POLICY_DIR="$TMPDIR_TEST/policies"

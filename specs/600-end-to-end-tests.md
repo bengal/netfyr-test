@@ -61,7 +61,7 @@ netns_setup "$@"
 
 # -- Inside the namespace --
 TMPDIR_TEST=$(mktemp -d)
-trap 'kill "${DAEMON_PID:-}" 2>/dev/null; rm -rf "$TMPDIR_TEST"' EXIT
+trap 'kill "${DAEMON_PID:-}" 2>/dev/null; cleanup; rm -rf "$TMPDIR_TEST"' EXIT
 
 SOCKET_PATH="$TMPDIR_TEST/netfyr.sock"
 POLICY_DIR="$TMPDIR_TEST/policies"
