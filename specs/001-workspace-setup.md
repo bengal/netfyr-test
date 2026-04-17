@@ -49,6 +49,7 @@ Developers clone the repository and run `cargo build` to compile all crates. The
   - `crates/netfyr-daemon/Cargo.toml`
   - `crates/netfyr-daemon/src/main.rs`
   - `tests/helpers.sh` (shared shell functions for integration tests)
+  - `README.md` (project overview, usage, build/test instructions)
 - Dependencies (external crates): none at this stage (stubs only)
 
 ### Root Cargo.toml structure
@@ -261,6 +262,19 @@ make integration-test SPEC=401
 bash tests/401-dhcpv4-lease.sh
 ```
 
+### README.md
+
+The root `README.md` provides a project overview, usage examples, build/test instructions, and the architecture diagram. It should cover:
+
+- **Project summary**: one-paragraph description of what netfyr does (declarative network configuration for Linux via netlink, policy-based with per-field priority reconciliation, daemon for DHCP factory lifecycle).
+- **Architecture**: the seven-crate layered structure (state, policy, reconcile, backend, varlink, cli, daemon) with a brief description of each crate's role.
+- **Usage examples**: `netfyr apply`, `netfyr query`, daemon mode with systemd, `--dry-run`.
+- **Building**: `cargo build`, per-crate builds, feature flags (`--features dhcp,systemd`).
+- **Testing**: `cargo test`, `make integration-test`, `make integration-test SPEC=NNN`. Note that integration tests use `unshare --user --net` and require no root.
+- **License**: reference to the LICENSE file.
+
+The README should be concise — a single file that a new developer can read in under 5 minutes to understand the project structure and get started.
+
 ## Depends on
 (none)
 
@@ -337,4 +351,12 @@ Feature: Rust workspace setup
     When the test scripts in tests/ are listed
     Then each test script is named NNN-description.sh where NNN is a spec number
     And helpers.sh is the only non-numbered .sh file in tests/
+
+  Scenario: README.md exists and covers key topics
+    Given the workspace is set up
+    When the file README.md is inspected
+    Then it describes what netfyr does
+    And it lists the seven crates with their roles
+    And it includes usage examples for apply and query commands
+    And it includes build and test instructions
 ```
