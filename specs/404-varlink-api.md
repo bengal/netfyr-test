@@ -220,7 +220,7 @@ Shell test script rules (from SPEC-001):
 - **Helpers**: source `tests/helpers.sh` which provides `netns_setup`, `create_veth`, `add_address`, `start_dnsmasq`, `cleanup`, and assertion functions.
 
 ## Verification
-In addition to `cargo test` and `cargo clippy`, run `make integration-test` to execute all shell integration test scripts. All tests must pass. This is a required verification step — the story is not complete until shell tests pass.
+In addition to `cargo test` and `cargo clippy`, run `make integration-test SPEC=404` to execute this story's shell integration tests. All tests must pass. This is a required verification step — the story is not complete until shell tests pass.
 
 ## Acceptance criteria
 ```gherkin

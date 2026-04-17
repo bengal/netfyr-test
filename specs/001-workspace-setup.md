@@ -124,7 +124,7 @@ Test scripts locate the `netfyr` and `netfyr-daemon` binaries relative to the sc
 
 #### Verification requirement
 
-**Every story that adds or modifies shell integration test scripts must run `make integration-test` as a verification step.** `cargo test` alone is not sufficient — it only runs Rust tests, not shell scripts. The story's implementation is not complete until all shell integration tests pass. This is an additional verification step beyond `cargo test` (see the verify prompt's step 5).
+**Every story that adds or modifies shell integration test scripts must run `make integration-test SPEC=NNN` as a verification step**, where `NNN` is the story's spec number. This runs only the tests belonging to that story, avoiding failures from tests that belong to stories not yet implemented. `cargo test` alone is not sufficient — it only runs Rust tests, not shell scripts. The story's implementation is not complete until its shell integration tests pass. This is an additional verification step beyond `cargo test` (see the verify prompt's step 5).
 
 **`tests/helpers.sh`** -- Shared shell functions sourced by all test scripts:
 
@@ -208,16 +208,20 @@ echo "PASS: 401-dhcpv4-lease"
 
 **Makefile (`integration-test` target):**
 
-The `Makefile` provides a single `integration-test` target. It builds the project first, then discovers and runs all numbered test scripts:
+The `Makefile` provides a single `integration-test` target. It builds the project first, then discovers and runs test scripts. An optional `SPEC` variable filters to a single story's tests:
 
 ```makefile
 .PHONY: integration-test
 
 integration-test:
 	cargo build
-	@scripts=$$(ls tests/[0-9]*.sh 2>/dev/null); \
+	@if [ -n "$(SPEC)" ]; then \
+		scripts=$$(ls tests/$(SPEC)-*.sh 2>/dev/null); \
+	else \
+		scripts=$$(ls tests/[0-9]*.sh 2>/dev/null); \
+	fi; \
 	if [ -z "$$scripts" ]; then \
-		echo "No integration test scripts found in tests/[0-9]*.sh"; \
+		echo "No integration test scripts found"; \
 		exit 0; \
 	fi; \
 	failed=0; \
@@ -238,7 +242,11 @@ integration-test:
 	fi
 ```
 
-Key points: the glob `tests/[0-9]*.sh` matches numbered test scripts and excludes `helpers.sh`. The `cargo build` step ensures binaries exist before any test runs.
+Key points:
+- The glob `tests/[0-9]*.sh` matches numbered test scripts and excludes `helpers.sh`.
+- `make integration-test SPEC=401` runs only `tests/401-*.sh` — use this in per-story verification to avoid running tests from other stories.
+- `make integration-test` (no filter) runs all tests — use this for end-to-end verification (SPEC-600).
+- The `cargo build` step ensures binaries exist before any test runs.
 
 **Running integration tests:**
 
@@ -246,12 +254,18 @@ Key points: the glob `tests/[0-9]*.sh` matches numbered test scripts and exclude
 # Run all integration tests (builds first)
 make integration-test
 
+# Run only tests for a specific story
+make integration-test SPEC=401
+
 # Run a single test (binary must already be built)
 bash tests/401-dhcpv4-lease.sh
 ```
 
 ## Depends on
 (none)
+
+## Verification
+In addition to `cargo test` and `cargo clippy`, run `make integration-test SPEC=001` to execute this story's shell integration tests. All tests must pass. This is a required verification step — the story is not complete until shell tests pass.
 
 ## Acceptance criteria
 ```gherkin
