@@ -85,9 +85,12 @@ Dry run: 2 changes would be applied.
 
 ### CLI argument parsing (`src/main.rs`)
 
+Running `netfyr` without arguments must print usage help (listing available subcommands) and exit with code 2. This is the default behavior of clap when no subcommand is provided, using `SubcommandRequiredElseHelp`:
+
 ```rust
 #[derive(Parser)]
 #[command(name = "netfyr", about = "Declarative Linux network configuration")]
+#[command(subcommand_required = true, arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -314,6 +317,11 @@ Feature: netfyr apply CLI command (daemon-free mode)
     And the conflicting field is not applied
     And other non-conflicting changes are applied
     And the exit code is 1
+
+  Scenario: No subcommand shows usage help
+    When the user runs "netfyr" with no arguments
+    Then the output shows usage help listing available subcommands (apply, query)
+    And the exit code is 2
 
   Scenario: No path arguments shows error
     When the user runs "netfyr apply" with no arguments
