@@ -59,7 +59,11 @@ The `Value` enum maps to YAML as follows:
 - `Value::List` -> YAML sequence
 - `Value::Map` -> YAML mapping
 
-Since YAML does not distinguish between IP addresses and strings, deserialization uses heuristics: a string value is first attempted as `IpNetwork`, then as `IpAddr`, and falls back to `String`. Numeric values are parsed as `U64` if non-negative, `I64` if negative. Booleans map directly. When schema validation is available (SPEC-006), the schema provides type hints to disambiguate.
+Since YAML does not distinguish between IP addresses and strings, deserialization uses heuristics: a string value is first attempted as `Ipv4Network` (IPv4 CIDR), then as `Ipv4Addr`, and falls back to `String`. IPv6 addresses are not supported and are treated as plain strings. Numeric values are parsed as `U64` if non-negative, `I64` if negative. Booleans map directly. When schema validation is available (SPEC-006), the schema provides type hints to disambiguate.
+
+### Address list ordering
+
+When a YAML field contains a list of values (e.g., `addresses`), the order of elements in the YAML is preserved through parsing, serialization, reconciliation, and application to the kernel. This is significant for addresses: the kernel assigns addresses in the order they are added, and the first address becomes the primary (source) address for outgoing traffic. Users rely on this ordering to control which address is primary.
 
 ### FieldValue serialization
 
@@ -159,8 +163,8 @@ When deserializing a YAML value into `Value` without schema context:
 1. YAML boolean -> `Value::Bool`
 2. YAML integer >= 0 -> `Value::U64`
 3. YAML integer < 0 -> `Value::I64`
-4. YAML string -> try parse as `IpNetwork`, then `IpAddr`, then keep as `Value::String`
-5. YAML sequence -> `Value::List` (recurse for each element)
+4. YAML string -> try parse as `Ipv4Network`, then `Ipv4Addr`, then keep as `Value::String` (IPv6 strings are not recognized and remain `Value::String`)
+5. YAML sequence -> `Value::List` (recurse for each element; order is preserved)
 6. YAML mapping -> `Value::Map` (recurse for each value)
 
 ### Serialization pseudocode

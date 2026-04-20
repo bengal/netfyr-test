@@ -58,7 +58,6 @@ netfyr query -o json          # short flag
   speed: 1000
   addresses:
     - 10.0.1.50/24
-    - fe80::1/64
   routes:
     - destination: 0.0.0.0/0
       gateway: 10.0.1.1
@@ -74,7 +73,7 @@ netfyr query -o json          # short flag
     "mac": "aa:bb:cc:dd:ee:ff",
     "carrier": true,
     "speed": 1000,
-    "addresses": ["10.0.1.50/24", "fe80::1/64"],
+    "addresses": ["10.0.1.50/24"],
     "routes": [{"destination": "0.0.0.0/0", "gateway": "10.0.1.1"}]
   }
 ]

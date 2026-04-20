@@ -162,7 +162,83 @@ Simulates a user with a policy directory (like `/etc/netfyr/policies/`):
 4. Run `netfyr apply $POLICY_DIR/` (passing the directory).
 5. Verify `veth-a0` has mtu=1400 and `veth-b0` has mtu=1300.
 
-#### 8. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
+#### 8. Single address applied and preserved (`600-e2e-addr-single.sh`)
+Verifies basic address application:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Write a policy with one address: `10.99.0.1/24`.
+4. Run `netfyr apply`.
+5. Verify with `ip addr show veth-addr0` that `10.99.0.1/24` is present.
+6. Verify with `netfyr query -s name=veth-addr0 -o json` that the addresses list contains exactly `["10.99.0.1/24"]`.
+
+#### 9. Five addresses applied in order (`600-e2e-addr-five.sh`)
+Verifies that multiple addresses are applied and their order is preserved:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Write a policy with 5 addresses: `10.99.0.1/24`, `10.99.0.2/24`, `10.99.0.3/24`, `10.99.0.4/24`, `10.99.0.5/24`.
+4. Run `netfyr apply`.
+5. Verify with `ip addr show veth-addr0` that all 5 addresses are present.
+6. Verify with `netfyr query -s name=veth-addr0 -o json` that the addresses list contains all 5 addresses in the same order as the YAML.
+
+#### 10. Twenty addresses applied in order (`600-e2e-addr-twenty.sh`)
+Stress test with many addresses:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Write a policy with 20 addresses: `10.99.0.1/24` through `10.99.0.20/24`.
+4. Run `netfyr apply`.
+5. Verify with `ip addr show veth-addr0` that all 20 addresses are present.
+6. Verify with `netfyr query -s name=veth-addr0 -o json` that the addresses list contains all 20 addresses in the same order as the YAML.
+
+#### 11. Address replacement (`600-e2e-addr-replace.sh`)
+Verifies that replacing the address set works correctly:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Apply policy A with 5 addresses: `10.99.0.1/24` through `10.99.0.5/24`.
+4. Verify all 5 are present.
+5. Apply policy B with 5 different addresses: `10.99.1.1/24` through `10.99.1.5/24`.
+6. Verify with `ip addr show` that none of the old addresses (`10.99.0.*`) are present.
+7. Verify with `netfyr query` that the new 5 addresses are present in the correct order.
+
+#### 12. Idempotent address re-apply (`600-e2e-addr-idempotent.sh`)
+Verifies that applying the same addresses twice is clean:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Apply a policy with 5 addresses: `10.99.0.1/24` through `10.99.0.5/24`.
+4. Verify all 5 are present in order.
+5. Apply the exact same policy again.
+6. Verify all 5 are still present in the same order.
+7. Verify no duplicates (each address appears exactly once in `ip addr show`).
+
+#### 13. Duplicate address in YAML is rejected (`600-e2e-addr-duplicate-reject.sh`)
+Verifies that duplicate addresses in YAML produce a validation error:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Write a policy with duplicate addresses: `10.99.0.1/24`, `10.99.0.2/24`, `10.99.0.1/24`.
+4. Run `netfyr apply`.
+5. Verify the exit code is non-zero (2 for validation error).
+6. Verify the error output mentions duplicate address.
+7. Verify `ip addr show veth-addr0` has no addresses (nothing was applied).
+
+#### 14. Overlapping subnets (`600-e2e-addr-overlapping-subnets.sh`)
+Verifies that multiple addresses on different subnets work:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Write a policy with addresses on different subnets: `10.99.0.1/24`, `10.99.1.1/24`, `10.99.2.1/24`.
+4. Run `netfyr apply`.
+5. Verify all 3 addresses are present with `ip addr show`.
+6. Verify order is preserved via `netfyr query`.
+
+#### 15. Address removal via replace-all (`600-e2e-addr-removal.sh`)
+Verifies that addresses are cleaned up when a policy with no addresses replaces one that had them:
+1. Create veth pair `veth-addr0`/`veth-addr1`.
+2. Start the daemon.
+3. Apply a policy with mtu=1400 and 3 addresses: `10.99.0.1/24`, `10.99.0.2/24`, `10.99.0.3/24`.
+4. Verify all 3 addresses are present.
+5. Apply a new policy with only mtu=1400 (no addresses field).
+6. Verify all 3 addresses have been removed from the interface.
+7. Verify mtu is still 1400 (only addresses were removed).
+
+#### 16. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
 2. Manually configure `veth-other0` with mtu=1400 and address `10.99.2.1/24` using `ip` commands.
@@ -173,6 +249,7 @@ Verifies that interfaces not targeted by any policy are left alone:
 
 ## Depends on
 - SPEC-001 (test infrastructure, helpers.sh, Makefile)
+- SPEC-006 (schema validation — needed for duplicate address rejection test)
 - SPEC-103 (backend apply — needed for static policies to take effect)
 - SPEC-201 (reconciliation — merges multiple policies)
 - SPEC-202 (conflict detection — needed for conflict test)
@@ -255,6 +332,74 @@ Feature: End-to-end apply directory
     And a directory containing policies for veth-a0 (mtu=1400) and veth-b0 (mtu=1300)
     When `netfyr apply $DIR/` is run
     Then veth-a0 has mtu=1400 and veth-b0 has mtu=1300
+
+Feature: End-to-end single address
+  Scenario: Apply a single address and verify it is present
+    Given a namespace with a veth pair "veth-addr0"/"veth-addr1" and the daemon running
+    And a YAML policy setting veth-addr0 addresses=["10.99.0.1/24"]
+    When `netfyr apply policy.yaml` is run
+    Then `ip addr show veth-addr0` shows 10.99.0.1/24
+    And `netfyr query -s name=veth-addr0 -o json` shows addresses=["10.99.0.1/24"]
+
+Feature: End-to-end five addresses in order
+  Scenario: Apply five addresses and verify order is preserved
+    Given a namespace with a veth pair "veth-addr0"/"veth-addr1" and the daemon running
+    And a YAML policy setting veth-addr0 addresses=["10.99.0.1/24", "10.99.0.2/24", "10.99.0.3/24", "10.99.0.4/24", "10.99.0.5/24"]
+    When `netfyr apply policy.yaml` is run
+    Then `ip addr show veth-addr0` shows all 5 addresses
+    And `netfyr query -s name=veth-addr0 -o json` returns addresses in the same order as the YAML
+
+Feature: End-to-end twenty addresses in order
+  Scenario: Apply twenty addresses and verify order is preserved
+    Given a namespace with a veth pair "veth-addr0"/"veth-addr1" and the daemon running
+    And a YAML policy setting veth-addr0 addresses=["10.99.0.1/24" through "10.99.0.20/24"]
+    When `netfyr apply policy.yaml` is run
+    Then `ip addr show veth-addr0` shows all 20 addresses
+    And `netfyr query -s name=veth-addr0 -o json` returns all 20 addresses in the same order as the YAML
+
+Feature: End-to-end address replacement
+  Scenario: Replacing all addresses removes old ones and adds new ones in order
+    Given a namespace with a veth pair and the daemon running
+    And policy A is applied with addresses=["10.99.0.1/24" through "10.99.0.5/24"]
+    And all 5 addresses are confirmed present
+    When policy B is applied with addresses=["10.99.1.1/24" through "10.99.1.5/24"]
+    Then none of the 10.99.0.* addresses are present
+    And all 5 new 10.99.1.* addresses are present in the correct order
+
+Feature: End-to-end idempotent address re-apply
+  Scenario: Applying the same addresses twice produces no duplicates
+    Given a namespace with a veth pair and the daemon running
+    And a policy with addresses=["10.99.0.1/24" through "10.99.0.5/24"] is applied
+    And all 5 are confirmed present in order
+    When the exact same policy is applied again
+    Then all 5 addresses are still present in the same order
+    And no address appears more than once in `ip addr show`
+
+Feature: End-to-end duplicate address rejection
+  Scenario: Duplicate addresses in YAML produce a validation error
+    Given a namespace with a veth pair and the daemon running
+    And a YAML policy with addresses=["10.99.0.1/24", "10.99.0.2/24", "10.99.0.1/24"]
+    When `netfyr apply policy.yaml` is run
+    Then the exit code is 2 (validation error)
+    And the error output mentions duplicate address "10.99.0.1/24"
+    And `ip addr show veth-addr0` has no addresses (nothing was applied)
+
+Feature: End-to-end overlapping subnets
+  Scenario: Addresses on different subnets coexist on the same interface
+    Given a namespace with a veth pair and the daemon running
+    And a YAML policy with addresses=["10.99.0.1/24", "10.99.1.1/24", "10.99.2.1/24"]
+    When `netfyr apply policy.yaml` is run
+    Then all 3 addresses are present on the interface
+    And `netfyr query` returns them in the same order as the YAML
+
+Feature: End-to-end address removal via replace-all
+  Scenario: Replacing a policy that has addresses with one that has none removes all addresses
+    Given a namespace with a veth pair and the daemon running
+    And a policy with mtu=1400 and addresses=["10.99.0.1/24", "10.99.0.2/24", "10.99.0.3/24"] is applied
+    And all 3 addresses are confirmed present
+    When a new policy with only mtu=1400 (no addresses) is applied
+    Then all 3 addresses are removed from the interface
+    And mtu is still 1400
 
 Feature: End-to-end unmanaged interfaces
   Scenario: Interfaces without policies are not modified

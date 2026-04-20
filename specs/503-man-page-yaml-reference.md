@@ -188,7 +188,10 @@ FIELDS
                Maximum transmission unit.
 
            addresses (sequence of strings)
-               IP addresses in CIDR notation (e.g., "10.0.1.50/24").
+               IPv4 addresses in CIDR notation (e.g., "10.0.1.50/24").
+               Order is preserved: the first address becomes the primary
+               (source) address. Duplicate addresses are rejected.
+               IPv6 is not supported.
 
            routes (sequence of mappings)
                Each route has: destination (CIDR string), gateway (IP
@@ -203,11 +206,15 @@ VALUE TYPES
            YAML boolean           netfyr Bool
            YAML integer >= 0      netfyr U64
            YAML integer < 0       netfyr I64
-           YAML string "a.b.c.d"  netfyr IpAddr (if valid IP)
-           YAML string "a.b/n"    netfyr IpNetwork (if valid CIDR)
+           YAML string "a.b.c.d"  netfyr IpAddr (if valid IPv4)
+           YAML string "a.b/n"    netfyr IpNetwork (if valid IPv4 CIDR)
            YAML string (other)    netfyr String
            YAML sequence          netfyr List
            YAML mapping           netfyr Map
+
+       IPv6 addresses are not supported. Strings containing IPv6
+       addresses (e.g., "fe80::1") are treated as plain strings and
+       will fail schema validation if used in address fields.
 
 FILES
        /etc/netfyr/policies/

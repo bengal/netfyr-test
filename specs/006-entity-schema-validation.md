@@ -34,7 +34,7 @@ The first schema to implement, embedded as a JSON Schema file:
 | Field | Type | Constraints | Required | Writable | Description |
 |---|---|---|---|---|---|
 | `mtu` | integer | min: 68, max: 65535 | no | yes | Maximum transmission unit |
-| `addresses` | array of strings | each item: CIDR format (e.g., "10.0.1.50/24") | no | yes | IP addresses assigned to the interface |
+| `addresses` | array of strings | each item: IPv4 CIDR format (e.g., "10.0.1.50/24"); no duplicates allowed; order is preserved | no | yes | IPv4 addresses assigned to the interface |
 | `mac` | string | MAC address format (XX:XX:XX:XX:XX:XX) | no | **read-only** | Hardware MAC address |
 | `carrier` | boolean | — | no | **read-only** | Whether the link has carrier |
 | `speed` | integer | min: 0 | no | **read-only** | Link speed in Mbps |
@@ -115,6 +115,9 @@ The `x-netfyr-writable` extension property indicates whether a field can be set 
 4. Run JSON Schema validation via `jsonschema` crate
 5. Collect all validation errors
 6. If `validate_writable()`, additionally check each field against `x-netfyr-writable` metadata
+7. Run netfyr-specific validation rules beyond what JSON Schema covers:
+   - **Duplicate address check**: if `addresses` contains duplicate CIDR strings, report a `ConstraintViolation` for each duplicate.
+   - **IPv4-only check**: if any address in `addresses` is an IPv6 address (contains `:`), report an `InvalidFormat` error. IPv6 is not supported in this version.
 
 ### Converting Value to JSON for validation
 The `Value` enum must implement `Into<serde_json::Value>` for schema validation:
@@ -205,6 +208,24 @@ Feature: Ethernet schema validation
     When validate() is called
     Then it returns ValidationErrors with at least 2 errors
     And one error is for field "mtu" and another for field "foo"
+
+  Scenario: Duplicate addresses are rejected
+    Given an State with entity_type "ethernet" and fields:
+      | field     | value                              |
+      | addresses | ["10.0.1.50/24", "10.0.1.50/24"]   |
+    When validate() is called
+    Then it returns ValidationErrors
+    And the errors include a ConstraintViolation error for field "addresses"
+    And the message mentions duplicate address "10.0.1.50/24"
+
+  Scenario: IPv6 addresses are rejected
+    Given an State with entity_type "ethernet" and fields:
+      | field     | value              |
+      | addresses | ["fe80::1/64"]     |
+    When validate() is called
+    Then it returns ValidationErrors
+    And the errors include an InvalidFormat error for field "addresses"
+    And the message mentions that IPv6 is not supported
 
 Feature: Field info queries
   Scenario: Query field metadata

@@ -33,7 +33,7 @@ The `StateDiff` contains a list of `DiffOperation` entries. Each has an operatio
 1. Look up the interface index by name.
 2. For each field change in the operation:
    - `mtu`: `handle.link().set(index).mtu(value).execute()`
-   - `addresses` (add): For each new address, `handle.address().add(index, address, prefix_len).execute()`
+   - `addresses` (add): For each new address, in the order they appear in the desired state list, `handle.address().add(index, address, prefix_len).execute()`. Order is significant: the kernel assigns addresses in the order they are added, and the first address becomes the primary (source) address. Only IPv4 addresses are supported.
    - `addresses` (remove): For each removed address, `handle.address().del(index, address, prefix_len).execute()`
    - `routes` (add): For each new route, `handle.route().add().output_interface(index).destination_prefix(dst, len).gateway(gw).execute()`
    - `routes` (remove): For each removed route, look up the route and delete it via `handle.route().del(route_message).execute()`
@@ -73,7 +73,7 @@ Operations should be idempotent where possible:
 
 When modifying an entity, field changes are applied in a specific order:
 1. Link-level changes first (mtu, link up/down).
-2. Address changes second (add before remove, to avoid transient loss of all addresses).
+2. Address changes second. When replacing the address set: remove old addresses first, then add new addresses in the order they appear in the desired state list. This ensures the kernel's address order matches the YAML order, and the first address in the list becomes the primary (source) address.
 3. Route changes last (since routes depend on addresses for next-hop resolution).
 
 ## Depends on

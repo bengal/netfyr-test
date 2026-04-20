@@ -40,8 +40,8 @@ The query result is a `StateSet` containing `State` entries that the CLI formats
   2. Filter to only ethernet interfaces (check `ARPHRD_ETHER` link type, exclude virtual types like vlan/bridge/bond by checking `link_info` kind attribute).
   3. If selector is provided, further filter by matching criteria.
   4. For each matching link, extract attributes into `State` fields.
-  5. Use `handle.address().get().execute()` to dump addresses, match by interface index.
-  6. Use `handle.route().get(IpVersion::V4).execute()` and `handle.route().get(IpVersion::V6).execute()` to dump routes, match by output interface index.
+  5. Use `handle.address().get().execute()` to dump addresses, match by interface index. Only IPv4 addresses are included; IPv6 addresses are filtered out. The addresses are returned in the order reported by the kernel (which matches the order they were added).
+  6. Use `handle.route().get(IpVersion::V4).execute()` to dump IPv4 routes, match by output interface index. IPv6 routes are not queried.
   7. Build and return `StateSet`.
 
 ### Field mapping (netlink attributes to State fields)
@@ -55,7 +55,7 @@ The query result is a `StateSet` containing `State` entries that the CLI formats
 | `speed` | Read from `/sys/class/net/<name>/speed` | u32 in Mbps; may be unavailable if link is down, set to None |
 | `driver` | `IFLA_INFO_KIND` or `/sys/class/net/<name>/device/driver` symlink | String, e.g., `e1000`, `ixgbe` |
 | `operstate` | `IFLA_OPERSTATE` from link message | Enum: Up, Down, Dormant, etc. |
-| `addresses` | From address dump (`RTM_GETADDR`), filtered by `ifa_index` | List of CIDR strings, e.g., `["10.0.1.50/24", "fe80::1/64"]` |
+| `addresses` | From address dump (`RTM_GETADDR`), filtered by `ifa_index`, IPv4 only | List of IPv4 CIDR strings, e.g., `["10.0.1.50/24", "10.0.2.50/24"]`; order matches kernel addition order |
 | `routes` | From route dump (`RTM_GETROUTE`), filtered by `oif` | List of route objects with destination, gateway, metric, scope |
 
 ### Selector matching
@@ -114,11 +114,13 @@ Feature: Query ethernet interfaces via rtnetlink
     And the entity has selector name "eth0"
     And the entity has the correct mtu, mac, and carrier values for eth0
 
-  Scenario: Query ethernet interface includes IP addresses
-    Given an ethernet interface "eth0" with addresses "10.0.1.50/24" and "fe80::1/64"
+  Scenario: Query ethernet interface includes IPv4 addresses
+    Given an ethernet interface "eth0" with addresses "10.0.1.50/24" and "10.0.2.50/24"
     When query is called for "eth0"
-    Then the entity's "addresses" field contains ["10.0.1.50/24", "fe80::1/64"]
+    Then the entity's "addresses" field contains ["10.0.1.50/24", "10.0.2.50/24"]
+    And IPv6 addresses (e.g., fe80::) are excluded
     And the addresses field has provenance KernelDefault
+    And the address order matches the order they were added to the kernel
 
   Scenario: Query ethernet interface includes routes
     Given an ethernet interface "eth0" with a default route via "10.0.1.1"

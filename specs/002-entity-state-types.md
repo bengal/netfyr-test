@@ -22,8 +22,8 @@ Types to implement:
    - `U64(u64)`
    - `I64(i64)`
    - `Bool(bool)`
-   - `IpAddr(std::net::IpAddr)`
-   - `IpNetwork(ipnetwork::IpNetwork)`
+   - `IpAddr(std::net::Ipv4Addr)` -- IPv4 only; IPv6 is not supported in this version
+   - `IpNetwork(ipnetwork::Ipv4Network)` -- IPv4 CIDR only; IPv6 is not supported in this version
    - `List(Vec<Value>)`
    - `Map(IndexMap<String, Value>)`
 
@@ -43,7 +43,7 @@ Types to implement:
 All types must derive or implement: `Clone`, `Debug`, `Serialize`, `Deserialize`, `PartialEq`.
 
 ## Why
-The state layer is the foundation of netfyr's architecture. Every layer above -- policies, reconciliation, backend, daemon -- operates on these types. Per-field provenance tracking is a key differentiator that allows answering "where did this value come from?" at any time. The `Value` enum must support all data types found in network configuration (strings, integers, booleans, IP addresses, CIDR networks, nested lists, and maps for complex structures like routes). Using `IndexMap` for fields and map values preserves insertion order, which matters for deterministic YAML serialization and user-facing output.
+The state layer is the foundation of netfyr's architecture. Every layer above -- policies, reconciliation, backend, daemon -- operates on these types. Per-field provenance tracking is a key differentiator that allows answering "where did this value come from?" at any time. The `Value` enum must support all data types found in network configuration (strings, integers, booleans, IPv4 addresses, IPv4 CIDR networks, nested lists, and maps for complex structures like routes). IPv6 is not supported in this version. Using `IndexMap` for fields and map values preserves insertion order, which matters for deterministic YAML serialization and user-facing output.
 
 ## User interaction
 These types are internal library types. Other crates (netfyr-policy, netfyr-reconcile, netfyr-backend, netfyr-daemon) depend on them to construct, manipulate, and serialize network state. Users interact with them indirectly through YAML files (SPEC-005) and CLI output (SPEC-302).
@@ -68,7 +68,7 @@ These types are internal library types. Other crates (netfyr-policy, netfyr-reco
 ### Value enum details
 
 The `Value` enum must implement:
-- `From<String>`, `From<&str>`, `From<u64>`, `From<i64>`, `From<bool>`, `From<IpAddr>`, `From<IpNetwork>` -- ergonomic construction
+- `From<String>`, `From<&str>`, `From<u64>`, `From<i64>`, `From<bool>`, `From<Ipv4Addr>`, `From<Ipv4Network>` -- ergonomic construction
 - `Display` -- human-readable formatting (e.g., IP addresses as dotted notation, lists as `[a, b, c]`)
 - A `as_str()` -> `Option<&str>` accessor, and similar typed accessors (`as_u64`, `as_bool`, etc.)
 
@@ -114,6 +114,7 @@ Feature: Entity state types
   Scenario: Value enum supports all required types
     Given the Value enum
     When values are created for each variant: String("eth0"), U64(1500), I64(-1), Bool(true), IpAddr(10.0.1.1), IpNetwork(10.0.1.0/24), List([String("a"), String("b")]), Map({"key": String("val")})
+    Note: IpAddr and IpNetwork are IPv4 only (Ipv4Addr and Ipv4Network)
     Then each value can be constructed without errors
     And each value implements Clone, Debug, PartialEq
 
