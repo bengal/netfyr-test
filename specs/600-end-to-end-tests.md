@@ -61,7 +61,7 @@ netns_setup "$@"
 
 # -- Inside the namespace --
 TMPDIR_TEST=$(mktemp -d)
-trap 'kill "${DAEMON_PID:-}" 2>/dev/null; cleanup; rm -rf "$TMPDIR_TEST"' EXIT
+trap 'kill "${DAEMON_PID:-}" 2>/dev/null; kill_dnsmasq; cleanup; rm -rf "$TMPDIR_TEST"' EXIT
 
 SOCKET_PATH="$TMPDIR_TEST/netfyr.sock"
 POLICY_DIR="$TMPDIR_TEST/policies"
@@ -106,7 +106,7 @@ Simulates a user configuring a static interface:
 #### 2. DHCP and static coexistence (`600-e2e-dhcp-and-static.sh`)
 Simulates a system with a DHCP-configured interface alongside a statically configured one:
 1. Create two veth pairs: `veth-static0`/`veth-static1` and `veth-dhcp0`/`veth-dhcp1`.
-2. Configure `veth-dhcp1` with address `10.99.1.1/24` and start dnsmasq serving `10.99.1.100-10.99.1.200`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24` and start dnsmasq serving `10.99.1.100-10.99.1.200`. The `start_dnsmasq` helper must record the PID so `kill_dnsmasq` can stop it in the EXIT trap.
 3. Write two policy files: a static policy for `veth-static0` (mtu=1400, address `10.99.0.1/24`) and a DHCP policy for `veth-dhcp0`.
 4. Start the daemon and apply both policies.
 5. Wait for the DHCP lease (poll up to 10 s).
@@ -267,7 +267,8 @@ Shell test script rules (from SPEC-001):
 - **Naming**: `600-e2e-description.sh` — the Makefile discovers tests via `tests/[0-9]*.sh`.
 - **No skip**: if a prerequisite is missing (binary, `unshare`, `dnsmasq`), the script must `echo "FAIL: ..." >&2; exit 1`. Never `exit 0` on failure. Never wrap `netns_setup` or `start_dnsmasq` with `|| exit 0`.
 - **Binary path**: locate binaries via `SCRIPT_DIR/../target/debug/netfyr` and `SCRIPT_DIR/../target/debug/netfyr-daemon` (overridable with `NETFYR_BIN` and `NETFYR_DAEMON_BIN` env vars). Check with `[[ ! -x "$NETFYR_BIN" ]]` and `exit 1` if missing.
-- **Helpers**: source `tests/helpers.sh` which provides `netns_setup`, `create_veth`, `add_address`, `start_dnsmasq`, `cleanup`, and assertion functions.
+- **Helpers**: source `tests/helpers.sh` which provides `netns_setup`, `create_veth`, `add_address`, `start_dnsmasq`, `kill_dnsmasq`, `cleanup`, and assertion functions.
+- **No process leaks**: every test script must kill all background processes it started (daemon, dnsmasq, etc.) in its EXIT trap. The `kill_dnsmasq` helper kills all dnsmasq processes started by the test. Leaked dnsmasq processes hold pipes open and cause the test runner to hang indefinitely. The EXIT trap must call `kill_dnsmasq` before `cleanup`.
 
 ## Verification
 Run `make integration-test` to execute all shell integration test scripts. All tests must pass. This is a required verification step — the story is not complete until shell tests pass. Since this story produces no Rust code, `cargo test` is still run (to verify no regressions) but the primary verification is `make integration-test`.
