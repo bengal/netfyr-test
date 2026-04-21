@@ -31,6 +31,8 @@ rpm -ql netfyr
 /usr/share/man/man1/netfyr.1.gz
 /usr/share/man/man1/netfyr-apply.1.gz
 /usr/share/man/man1/netfyr-query.1.gz
+/usr/share/man/man1/netfyr-history.1.gz
+/usr/share/man/man1/netfyr-revert.1.gz
 /usr/share/man/man5/netfyr.yaml.5.gz
 /usr/share/man/man7/netfyr-examples.7.gz
 /usr/share/doc/netfyr/examples/policies/bare-ethernet.yaml
@@ -39,6 +41,7 @@ rpm -ql netfyr
 
 rpm -ql netfyr-daemon
 /usr/bin/netfyr-daemon
+/usr/share/man/man8/netfyr-daemon.8.gz
 /usr/lib/systemd/system/netfyr.service
 /usr/lib/systemd/system/netfyr.socket
 /usr/share/licenses/netfyr-daemon/LICENSE
@@ -122,6 +125,8 @@ install -d %{buildroot}%{_mandir}/man5
 install -Dpm 0644 man/netfyr.yaml.5 %{buildroot}%{_mandir}/man5/
 install -d %{buildroot}%{_mandir}/man7
 install -Dpm 0644 man/netfyr-examples.7 %{buildroot}%{_mandir}/man7/
+install -d %{buildroot}%{_mandir}/man8
+install -Dpm 0644 man/netfyr-daemon.8 %{buildroot}%{_mandir}/man8/
 
 # Install systemd units
 install -Dpm 0644 dist/netfyr.service %{buildroot}%{_unitdir}/netfyr.service
@@ -157,6 +162,8 @@ target/release/netfyr-daemon --help > /dev/null
 %{_mandir}/man1/netfyr.1*
 %{_mandir}/man1/netfyr-apply.1*
 %{_mandir}/man1/netfyr-query.1*
+%{_mandir}/man1/netfyr-history.1*
+%{_mandir}/man1/netfyr-revert.1*
 %{_mandir}/man5/netfyr.yaml.5*
 %{_mandir}/man7/netfyr-examples.7*
 %dir %{_sysconfdir}/netfyr
@@ -166,6 +173,7 @@ target/release/netfyr-daemon --help > /dev/null
 %files daemon
 %license LICENSE
 %{_bindir}/netfyr-daemon
+%{_mandir}/man8/netfyr-daemon.8*
 %{_unitdir}/netfyr.service
 %{_unitdir}/netfyr.socket
 ```
@@ -221,7 +229,8 @@ WantedBy=sockets.target
 |---|---|---|
 | CLI binary | `/usr/bin/netfyr` | netfyr |
 | Daemon binary | `/usr/bin/netfyr-daemon` | netfyr-daemon |
-| Man pages (section 1) | `/usr/share/man/man1/netfyr*.1.gz` | netfyr |
+| Man pages (section 1) | `/usr/share/man/man1/netfyr{,-apply,-query,-history,-revert}.1.gz` | netfyr |
+| Man page (section 8) | `/usr/share/man/man8/netfyr-daemon.8.gz` | netfyr-daemon |
 | Man page (section 5) | `/usr/share/man/man5/netfyr.yaml.5.gz` | netfyr |
 | Man page (section 7) | `/usr/share/man/man7/netfyr-examples.7.gz` | netfyr |
 | Example files | `/usr/share/doc/netfyr/examples/` | netfyr |

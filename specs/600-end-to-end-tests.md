@@ -238,7 +238,132 @@ Verifies that addresses are cleaned up when a policy with no addresses replaces 
 6. Verify all 3 addresses have been removed from the interface.
 7. Verify mtu is still 1400 (only addresses were removed).
 
-#### 16. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
+#### 16. Journal entry after apply (`600-e2e-journal-apply.sh`)
+Verifies that `netfyr apply` records a journal entry:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply a static policy setting mtu=1400 on `veth-e2e0`.
+4. Verify `current.ndjson` exists in the journal directory.
+5. Parse the last line of `current.ndjson` with `jq`.
+6. Verify the entry has `trigger.type` = `"policy_apply"`.
+7. Verify the entry's diff mentions `veth-e2e0` and mtu.
+8. Verify the entry's `state_after` includes `veth-e2e0` with mtu=1400.
+9. Verify the entry's `outcome.kind` = `"applied"` with `succeeded` >= 1.
+
+#### 17. Journal sequence numbers increment (`600-e2e-journal-seq.sh`)
+Verifies sequence numbers are monotonic across multiple applies:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply policy A setting mtu=1400.
+4. Apply policy B setting mtu=1300.
+5. Read all lines from `current.ndjson`.
+6. Verify there are 2 entries with seq=1 and seq=2.
+7. Verify seq=1 timestamp is earlier than seq=2 timestamp.
+
+#### 18. History lists journal entries (`600-e2e-history-list.sh`)
+Verifies `netfyr history` shows recorded entries:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply policy A setting mtu=1400 on `veth-e2e0`.
+4. Apply policy B setting mtu=1300 on `veth-e2e0`.
+5. Run `netfyr history -n 5`.
+6. Verify the output contains 2 entries.
+7. Verify the entries are in reverse chronological order (most recent first).
+8. Verify each row shows SEQ, TIMESTAMP, TRIGGER, and OUTCOME columns.
+
+#### 19. History show detail (`600-e2e-history-show.sh`)
+Verifies `netfyr history --show` displays full entry detail:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply a policy setting mtu=1400 on `veth-e2e0`.
+4. Run `netfyr history --show 1`.
+5. Verify the output shows the trigger type.
+6. Verify the output shows the diff (mtu change).
+7. Verify the output shows the outcome.
+
+#### 20. History JSON output (`600-e2e-history-json.sh`)
+Verifies `netfyr history -o json` produces valid JSON:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply two policies sequentially.
+4. Run `netfyr history -n 5 -o json`.
+5. Pipe the output through `jq` to validate it is a JSON array.
+6. Verify the array has 2 elements.
+7. Verify each element has `seq`, `timestamp`, `trigger`, and `outcome` fields.
+
+#### 21. History filter by entity (`600-e2e-history-filter.sh`)
+Verifies `netfyr history` filtering works:
+1. Create two veth pairs: `veth-a0`/`veth-a1` and `veth-b0`/`veth-b1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply a policy for `veth-a0` (mtu=1400).
+4. Apply a policy for `veth-b0` (mtu=1300).
+5. Run `netfyr history -s name=veth-a0`.
+6. Verify only the entry for `veth-a0` is shown.
+
+#### 22. Revert to previous state (`600-e2e-revert.sh`)
+Verifies `netfyr revert` restores a previous state:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply policy A setting mtu=1400 on `veth-e2e0`. Note the seq number (1).
+4. Apply policy B setting mtu=1300 on `veth-e2e0`.
+5. Verify mtu is now 1300.
+6. Run `netfyr revert 1`.
+7. Verify mtu is now 1400.
+8. Verify the revert created a new journal entry with trigger type `"revert"`.
+
+#### 23. Revert dry-run (`600-e2e-revert-dry-run.sh`)
+Verifies `netfyr revert --dry-run` previews without applying:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply policy A setting mtu=1400.
+4. Apply policy B setting mtu=1300.
+5. Run `netfyr revert 1 --dry-run`.
+6. Verify the output mentions `mtu: 1300 -> 1400`.
+7. Verify mtu is still 1300 (unchanged).
+8. Verify no new journal entry was created (still only 2 entries).
+
+#### 24. Revert to nonexistent entry (`600-e2e-revert-noent.sh`)
+Verifies `netfyr revert` fails gracefully for missing entries:
+1. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+2. Run `netfyr revert 9999`.
+3. Verify the exit code is 1.
+4. Verify the output contains "not found".
+
+#### 25. Revert with address changes (`600-e2e-revert-addr.sh`)
+Verifies revert handles address restoration:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Apply policy A with addresses=["10.99.0.1/24", "10.99.0.2/24"]. Note seq (1).
+4. Apply policy B with addresses=["10.99.0.3/24"].
+5. Verify `veth-e2e0` has only `10.99.0.3/24`.
+6. Run `netfyr revert 1`.
+7. Verify `veth-e2e0` has addresses `10.99.0.1/24` and `10.99.0.2/24`.
+8. Verify `veth-e2e0` does not have `10.99.0.3/24`.
+
+#### 26. External change detection (`600-e2e-external-change.sh`)
+Verifies the daemon detects and journals external network changes without reverting them:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`. Note journal entry count.
+5. **External MTU change**: run `ip link set veth-e2e0 mtu 1500`.
+6. Sleep 1s (wait for debounce window).
+7. Run `netfyr history -n 1 -o json` and verify the latest entry has trigger type `"external_change"`.
+8. Verify the entry's diff shows mtu changed from 1400 to 1500.
+9. Verify `ip link show veth-e2e0` still shows mtu=1500 (daemon did not re-reconcile).
+10. **External address additions**: run `ip addr add 10.99.0.1/24 dev veth-e2e0` and `ip addr add 10.99.0.2/24 dev veth-e2e0`.
+11. Sleep 1s.
+12. Verify a new journal entry with trigger `"external_change"` was recorded.
+13. Verify the entry's diff shows the address additions.
+14. Verify `ip addr show veth-e2e0` shows both 10.99.0.1/24 and 10.99.0.2/24.
+15. **External address removal**: run `ip addr del 10.99.0.1/24 dev veth-e2e0`.
+16. Sleep 1s.
+17. Verify a new journal entry with trigger `"external_change"` was recorded.
+18. Verify the entry's diff shows the address removal.
+19. Verify `ip addr show veth-e2e0` shows only 10.99.0.2/24.
+20. Verify the daemon did not re-apply the original policy state at any point during the test.
+
+#### 27. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
 2. Manually configure `veth-other0` with mtu=1400 and address `10.99.2.1/24` using `ip` commands.
@@ -256,6 +381,10 @@ Verifies that interfaces not targeted by any policy are left alone:
 - SPEC-203 (diff generation — computes changes)
 - SPEC-301 (CLI apply — the command being tested)
 - SPEC-302 (CLI query — used for verification)
+- SPEC-351 (journal infrastructure — needed for journal and revert tests)
+- SPEC-352 (history CLI — needed for history tests)
+- SPEC-353 (external change detection — needed for external change test)
+- SPEC-354 (state revert — needed for revert tests)
 - SPEC-401 (DHCP factory — needed for DHCP tests)
 - SPEC-402 (policy store — needed for persistence test)
 - SPEC-403 (daemon — needed for all daemon-mode tests)
@@ -401,6 +530,113 @@ Feature: End-to-end address removal via replace-all
     When a new policy with only mtu=1400 (no addresses) is applied
     Then all 3 addresses are removed from the interface
     And mtu is still 1400
+
+Feature: End-to-end journal entry after apply
+  Scenario: Apply records a journal entry with correct metadata
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    When `netfyr apply policy.yaml` sets mtu=1400 on veth-e2e0
+    Then current.ndjson contains an entry with trigger "policy_apply"
+    And the entry's diff references veth-e2e0 and mtu
+    And the entry's state_after includes veth-e2e0 with mtu=1400
+    And the entry's outcome is "applied" with succeeded >= 1
+
+Feature: End-to-end journal sequence numbers
+  Scenario: Multiple applies produce incrementing sequence numbers
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    When two policies are applied sequentially
+    Then current.ndjson contains 2 entries with seq=1 and seq=2
+    And seq=1 has an earlier timestamp than seq=2
+
+Feature: End-to-end history list
+  Scenario: History shows recorded entries in reverse order
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And two policies have been applied
+    When `netfyr history -n 5` is run
+    Then the output contains 2 entries in reverse chronological order
+    And each row shows SEQ, TIMESTAMP, TRIGGER, and OUTCOME
+
+Feature: End-to-end history show
+  Scenario: History --show displays full entry detail
+    Given a namespace with a veth pair and a journal with one entry
+    When `netfyr history --show 1` is run
+    Then the output shows the trigger, diff, and outcome
+
+Feature: End-to-end history JSON
+  Scenario: History -o json produces valid JSON
+    Given a namespace with a veth pair and two journal entries
+    When `netfyr history -n 5 -o json` is run
+    Then the output is a valid JSON array with 2 elements
+    And each element has seq, timestamp, trigger, and outcome fields
+
+Feature: End-to-end history filter
+  Scenario: History filters by entity name
+    Given a namespace with two veth pairs and one apply per pair
+    When `netfyr history -s name=veth-a0` is run
+    Then only the entry affecting veth-a0 is shown
+
+Feature: End-to-end revert
+  Scenario: Revert restores a previous network state
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And policy A (mtu=1400) was applied as seq=1
+    And policy B (mtu=1300) was applied as seq=2
+    When `netfyr revert 1` is run
+    Then veth-e2e0 has mtu=1400
+    And a new journal entry with trigger "revert" exists
+
+Feature: End-to-end revert dry-run
+  Scenario: Revert --dry-run previews without applying
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And policy A (mtu=1400) at seq=1 and policy B (mtu=1300) at seq=2
+    When `netfyr revert 1 --dry-run` is run
+    Then the output mentions "mtu: 1300 -> 1400"
+    And veth-e2e0 still has mtu=1300
+    And the journal still has only 2 entries
+
+Feature: End-to-end revert nonexistent entry
+  Scenario: Revert to missing entry fails with clear error
+    When `netfyr revert 9999` is run
+    Then the exit code is 1
+    And the output contains "not found"
+
+Feature: End-to-end revert with addresses
+  Scenario: Revert restores address set from a previous state
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And policy A (addresses 10.99.0.1/24, 10.99.0.2/24) at seq=1
+    And policy B (addresses 10.99.0.3/24) at seq=2
+    When `netfyr revert 1` is run
+    Then veth-e2e0 has addresses 10.99.0.1/24 and 10.99.0.2/24
+    And veth-e2e0 does not have address 10.99.0.3/24
+
+Feature: End-to-end external change detection
+  Scenario: Daemon detects external MTU change
+    Given a namespace with a veth pair, the daemon running, and NETFYR_JOURNAL_DIR set
+    And a policy setting mtu=1400 on veth-e2e0 has been applied
+    When `ip link set veth-e2e0 mtu 1500` is run externally
+    And 1 second passes (debounce window)
+    Then the latest journal entry has trigger "external_change"
+    And the entry's diff shows mtu: 1400 -> 1500
+    And veth-e2e0 still has mtu=1500 (daemon did not re-reconcile)
+
+  Scenario: Daemon detects external address additions
+    Given the daemon is running with veth-e2e0 managed
+    When `ip addr add 10.99.0.1/24 dev veth-e2e0` and `ip addr add 10.99.0.2/24 dev veth-e2e0` are run
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows the address additions
+    And veth-e2e0 has both 10.99.0.1/24 and 10.99.0.2/24
+
+  Scenario: Daemon detects external address removal
+    Given veth-e2e0 has addresses 10.99.0.1/24 and 10.99.0.2/24
+    When `ip addr del 10.99.0.1/24 dev veth-e2e0` is run
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows the address removal
+    And veth-e2e0 has only 10.99.0.2/24
+
+  Scenario: Daemon does not re-apply policy after external changes
+    Given a policy setting mtu=1400 was applied via the daemon
+    When mtu, addresses are changed externally across multiple steps
+    Then the daemon records each change but never re-applies the original state
 
 Feature: End-to-end unmanaged interfaces
   Scenario: Interfaces without policies are not modified

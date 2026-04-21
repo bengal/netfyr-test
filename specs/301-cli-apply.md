@@ -92,8 +92,22 @@ Running `netfyr` without arguments must print usage help (listing available subc
 #[command(name = "netfyr", about = "Declarative Linux network configuration")]
 #[command(subcommand_required = true, arg_required_else_help = true)]
 struct Cli {
+    /// Control color output: auto (default), always, never.
+    #[arg(long, global = true, default_value = "auto")]
+    color: ColorMode,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Clone, ValueEnum)]
+enum ColorMode {
+    /// Enable colors when stdout is a TTY (default).
+    Auto,
+    /// Always enable colors, even when piped.
+    Always,
+    /// Disable colors.
+    Never,
 }
 
 #[derive(Subcommand)]
@@ -103,6 +117,21 @@ enum Commands {
     /// Query current system network state
     Query(QueryArgs),
 }
+```
+
+### Global color behavior
+
+The `--color` flag controls colored output for all subcommands. It is a global argument available on any subcommand (e.g., `netfyr apply --color=never ...`, `netfyr history --color=always`).
+
+Color resolution logic:
+1. If the `NO_COLOR` environment variable is set (any value, per https://no-color.org/), colors are disabled regardless of the `--color` flag.
+2. Otherwise, `--color=auto` (default) enables colors when stdout is a TTY. `--color=always` forces colors. `--color=never` disables colors.
+
+Colors are used for:
+- Diff output in `apply`, `apply --dry-run`, `revert --dry-run`, and `history --show`: `+` lines/prefixes in green, `-` in red, `~` in yellow.
+- The CHANGES column in `history` list output: `+` counts/prefixes in green, `-` in red, `~` in yellow.
+
+Colors reinforce but never replace textual indicators. Output is always unambiguous without color.
 
 #[derive(Args)]
 struct ApplyArgs {

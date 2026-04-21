@@ -7,9 +7,12 @@ Generate man pages for the `netfyr` CLI and all its subcommands using `clap_mang
 - `netfyr(1)` — top-level overview and subcommand listing
 - `netfyr-apply(1)` — apply policies to the system
 - `netfyr-query(1)` — query current network state
+- `netfyr-history(1)` — inspect journal of state changes
+- `netfyr-revert(1)` — revert to a previous network state
+- `netfyr-daemon(8)` — daemon operation, external change detection, journal
 - `netfyr-examples(7)` — annotated examples of common configuration scenarios
 
-Each section 1 man page includes NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXIT STATUS, FILES, EXAMPLES, and SEE ALSO sections. The EXAMPLES section contains at least two real-world usage examples per subcommand. The `netfyr-examples(7)` page is a hand-written troff file (not auto-generated) that provides comprehensive, copy-pasteable configuration examples. The generated and hand-written man pages are placed in a `man/` directory at the workspace root for packaging.
+Each section 1 man page includes NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXIT STATUS, FILES, EXAMPLES, and SEE ALSO sections. The EXAMPLES section contains at least two real-world usage examples per subcommand. The `netfyr-daemon(8)` page is a hand-written troff file (section 8 per Unix convention for system daemons) that documents daemon behavior including external change detection, its limitations, the journal, and the reconciliation lifecycle. The `netfyr-examples(7)` page is a hand-written troff file (not auto-generated) that provides comprehensive, copy-pasteable configuration examples. The generated and hand-written man pages are placed in a `man/` directory at the workspace root for packaging.
 
 ## Why
 
@@ -28,6 +31,9 @@ man ./man/netfyr.1
 man netfyr
 man netfyr-apply
 man netfyr-query
+man netfyr-history
+man netfyr-revert
+man netfyr-daemon
 man netfyr-examples
 ```
 
@@ -82,7 +88,120 @@ EXAMPLES
               netfyr apply --dry-run /etc/netfyr/policies/server.yaml
 
 SEE ALSO
-       netfyr(1), netfyr-query(1), netfyr.yaml(5)
+       netfyr(1), netfyr-query(1), netfyr-history(1), netfyr-revert(1),
+       netfyr-daemon(8), netfyr.yaml(5)
+```
+
+### Example man page output (netfyr-daemon)
+
+```
+NETFYR-DAEMON(8)           System Manager's Manual           NETFYR-DAEMON(8)
+
+NAME
+       netfyr-daemon — netfyr network configuration daemon
+
+SYNOPSIS
+       netfyr-daemon
+
+DESCRIPTION
+       The netfyr daemon is a long-running process that manages network
+       configuration. It listens on a Varlink socket for policy submissions
+       from the netfyr CLI, manages DHCPv4 client lifecycles, monitors for
+       external network changes, and records all state transitions in a
+       journal.
+
+       The daemon is typically started via systemd:
+
+              systemctl start netfyr
+
+EXTERNAL CHANGE DETECTION
+       The daemon monitors the kernel for network state changes made by
+       other tools (e.g., ip(8), NetworkManager) or by the kernel itself
+       (e.g., carrier loss). When an external change is detected on a
+       managed interface, the daemon records a journal entry with trigger
+       type "external_change" but does not re-apply the current desired
+       state.
+
+       Important limitations:
+
+       Only managed interfaces are monitored.
+              An interface is "managed" when at least one active policy
+              targets it. If no policies are active, no external changes
+              are detected. The daemon does not monitor interfaces that
+              have never been the target of a policy.
+
+       Monitored properties.
+              The daemon subscribes to netlink notifications for link
+              attribute changes (mtu, state, flags) and IPv4 address
+              additions and removals. Only properties that netfyr manages
+              on ethernet interfaces are tracked. Changes to properties
+              outside netfyr's scope (e.g., IPv6 addresses, routing
+              tables, qdiscs) are not detected.
+
+       Debounce window.
+              Network changes often arrive in bursts. The daemon coalesces
+              notifications within a 500ms window into a single journal
+              entry. This means there may be a short delay before a change
+              appears in the journal.
+
+       No automatic re-reconciliation.
+              The daemon records external changes but does not fight back.
+              To restore the desired state, run netfyr apply or submit
+              policies again. The next reconciliation cycle (e.g., a DHCP
+              event or policy submission) will re-apply the current desired
+              state, which may differ from the externally modified state.
+
+JOURNAL
+       The daemon writes all state transitions to an append-only journal
+       in NDJSON format. This includes policy applications, DHCP events,
+       daemon startup, external changes, and reverts.
+
+       The journal is stored at /var/lib/netfyr/journal/ by default
+       (configurable via NETFYR_JOURNAL_DIR). Use netfyr history(1) to
+       inspect journal entries and netfyr revert(1) to restore a previous
+       state.
+
+       Journal files are rotated at 10,000 entries or 50 MB (configurable
+       via NETFYR_JOURNAL_MAX_ENTRIES and NETFYR_JOURNAL_MAX_SIZE). Rotated
+       files are gzip-compressed and retained for 90 days by default
+       (configurable via NETFYR_JOURNAL_RETENTION_DAYS).
+
+ENVIRONMENT
+       NETFYR_SOCKET_PATH
+              Path to the Varlink socket (default: /run/netfyr/netfyr.sock).
+
+       NETFYR_POLICY_DIR
+              Directory for persisted policies (default: /var/lib/netfyr/policies/).
+
+       NETFYR_JOURNAL_DIR
+              Directory for journal files (default: /var/lib/netfyr/journal/).
+
+       NETFYR_JOURNAL_MAX_ENTRIES
+              Maximum entries per journal file before rotation (default: 10000).
+
+       NETFYR_JOURNAL_MAX_SIZE
+              Maximum journal file size in bytes before rotation (default: 52428800).
+
+       NETFYR_JOURNAL_RETENTION_DAYS
+              Days to retain rotated journal archives (default: 90).
+
+FILES
+       /run/netfyr/netfyr.sock
+              Varlink socket for CLI-to-daemon communication.
+
+       /var/lib/netfyr/policies/
+              Persisted policies that survive daemon restarts.
+
+       /var/lib/netfyr/journal/
+              Journal directory containing current.ndjson and archived
+              entries.
+
+       /etc/netfyr/policies/
+              User-provided policy files loaded at startup.
+
+SEE ALSO
+       netfyr(1), netfyr-apply(1), netfyr-query(1), netfyr-history(1),
+       netfyr-revert(1), netfyr.yaml(5), netfyr-examples(7), systemd(1)
 ```
 
 ### Example man page output (netfyr-examples)
@@ -200,8 +319,87 @@ DRY-RUN WORKFLOW
 
            $ netfyr apply /etc/netfyr/policies/
 
+INVESTIGATING CHANGES WITH HISTORY
+       List recent state changes from the journal:
+
+           $ netfyr history
+           SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
+           145  2026-04-20 15:10:05   external        eth0       observed       ~mtu
+           144  2026-04-20 15:00:00   policy-apply    eth0       applied (1 ok) ~mtu
+
+       Show full details for a specific entry:
+
+           $ netfyr history --show 145
+           Entry #145 at 2026-04-20 15:10:05 UTC
+           Trigger: external-change
+             Changed entities: eth0
+           Diff:
+             ~ ethernet eth0
+                 mtu: 9000 -> 1500
+           Outcome: observed (no action taken)
+
+       Filter by entity and output as JSON for scripting:
+
+           $ netfyr history -s name=eth0 --since 1h -o json | jq '.[].trigger'
+
+EXTERNAL CHANGE DETECTION
+       The daemon automatically monitors managed interfaces for changes
+       made by other tools. To use this feature:
+
+       1. Create a policy for the interface you want to monitor:
+
+           File: /etc/netfyr/policies/eth0.yaml
+
+              type: ethernet
+              name: eth0
+              mtu: 9000
+
+       2. Apply the policy and start the daemon:
+
+              $ netfyr apply /etc/netfyr/policies/
+              $ sudo systemctl start netfyr
+
+       3. When an external tool changes the interface, the daemon records
+          it in the journal:
+
+              $ ip link set eth0 mtu 1500
+              $ netfyr history -n 1
+              SEQ  TIMESTAMP             TRIGGER    ENTITIES  OUTCOME   CHANGES
+              146  2026-04-20 15:15:00   external   eth0      observed  ~mtu
+
+       Important: only interfaces targeted by at least one active policy
+       are monitored. If you want to track changes to an interface, you
+       must have a policy for it — even a minimal one that only declares
+       the type and name. See netfyr-daemon(8) for full details on
+       limitations.
+
+REVERTING TO A PREVIOUS STATE
+       After investigating changes with netfyr history, revert to a known
+       good state:
+
+           $ netfyr history -n 3
+           SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
+           146  2026-04-20 15:15:00   external        eth0       observed       ~mtu
+           145  2026-04-20 15:10:05   policy-apply    eth0       applied (1 ok) ~mtu
+           144  2026-04-20 15:00:00   policy-apply    eth0       applied (2 ok) ~mtu, addr(+1)
+
+           $ netfyr revert 145 --dry-run
+           Reverting to state from entry #145 (2026-04-20 15:10:05 UTC)
+           Changes that would be applied:
+             ~ ethernet eth0
+                 mtu: 1500 -> 9000
+
+           $ netfyr revert 145
+           Reverting to state from entry #145 (2026-04-20 15:10:05 UTC)
+           Applied 1 change (1 entity modified).
+
+       In daemon mode, a warning is printed because the active policies
+       are not changed. The next reconciliation cycle may re-apply the
+       current desired state.
+
 SEE ALSO
-       netfyr(1), netfyr-apply(1), netfyr-query(1), netfyr.yaml(5)
+       netfyr(1), netfyr-apply(1), netfyr-query(1), netfyr-history(1),
+       netfyr-revert(1), netfyr-daemon(8), netfyr.yaml(5)
 ```
 
 ## Implementation details
@@ -212,6 +410,7 @@ SEE ALSO
   - `xtask/src/main.rs` — xtask entry point with `man` subcommand
   - `.cargo/config.toml` — alias `cargo xtask` to `cargo run --package xtask --`
 - Hand-written files:
+  - `man/netfyr-daemon.8` — hand-written troff man page for the daemon (section 8)
   - `man/netfyr-examples.7` — hand-written troff man page (not auto-generated)
 - Dependencies (external crates): `clap_mangen` (man page generation from clap), `clap` (re-use CLI definitions from `netfyr-cli`)
 
@@ -281,8 +480,9 @@ fn generate_man_pages() -> Result<(), Box<dyn std::error::Error>> {
 - **FILES**: `/etc/netfyr/policies/`, `/var/lib/netfyr/`.
 - **EXAMPLES**: two examples per subcommand, drawn from the User Interaction sections of the respective specs.
 - **SEE ALSO**: cross-references between all netfyr man pages.
+- **ENVIRONMENT**: document `NO_COLOR` (disables colored output) in `netfyr(1)` and all subcommand pages.
 
-Note: The xtask does not generate or overwrite `man/netfyr-examples.7` — that file is maintained by hand, similar to `man/netfyr.yaml.5` (SPEC-503). A comment at the top of the troff source notes that the file is maintained by hand.
+Note: The xtask does not generate or overwrite `man/netfyr-daemon.8` or `man/netfyr-examples.7` — those files are maintained by hand, similar to `man/netfyr.yaml.5` (SPEC-503). A comment at the top of each troff source notes that the file is maintained by hand.
 
 ### Files in man/ directory
 
@@ -291,6 +491,9 @@ man/
 ├── netfyr.1              (auto-generated by xtask)
 ├── netfyr-apply.1        (auto-generated by xtask)
 ├── netfyr-query.1        (auto-generated by xtask)
+├── netfyr-history.1      (auto-generated by xtask)
+├── netfyr-revert.1       (auto-generated by xtask)
+├── netfyr-daemon.8       (hand-written)
 └── netfyr-examples.7     (hand-written)
 ```
 
@@ -298,6 +501,11 @@ man/
 
 - SPEC-301 (CLI apply — provides clap definitions and exit codes)
 - SPEC-302 (CLI query — provides clap definitions and exit codes)
+- SPEC-351 (Journal infrastructure — journal behavior documented in netfyr-daemon(8))
+- SPEC-352 (History CLI — provides clap definitions for history subcommand)
+- SPEC-353 (External change detection — behavior documented in netfyr-daemon(8))
+- SPEC-354 (State revert — provides clap definitions for revert subcommand)
+- SPEC-403 (Daemon — daemon behavior documented in netfyr-daemon(8))
 
 ## Acceptance criteria
 
@@ -308,8 +516,8 @@ Feature: Man page generation
     Given the workspace compiles successfully
     When the developer runs "cargo xtask man"
     Then the man/ directory is created
-    And it contains netfyr.1, netfyr-apply.1, netfyr-query.1
-    And it does not overwrite the hand-written netfyr-examples.7
+    And it contains netfyr.1, netfyr-apply.1, netfyr-query.1, netfyr-history.1, netfyr-revert.1
+    And it does not overwrite the hand-written netfyr-daemon.8 or netfyr-examples.7
 
   Scenario: Top-level man page lists all subcommands
     Given man pages have been generated
@@ -357,14 +565,50 @@ Feature: Man page generation
   Scenario: Examples man page covers common scenarios
     Given the examples man page is rendered
     Then it includes sections for:
-      | Static IP on a single interface     |
-      | Multiple interfaces in one file     |
-      | DHCP on an interface                |
-      | Mixed static and DHCP               |
-      | Priority override                   |
-      | Selecting by driver                 |
-      | Dry-run workflow                    |
-    And each section contains a copy-pasteable YAML example
+      | Static IP on a single interface          |
+      | Multiple interfaces in one file          |
+      | DHCP on an interface                     |
+      | Mixed static and DHCP                    |
+      | Priority override                        |
+      | Selecting by driver                      |
+      | Dry-run workflow                         |
+      | Investigating changes with history       |
+      | External change detection                |
+      | Reverting to a previous state            |
+    And each section contains a copy-pasteable example
+
+  Scenario: Daemon man page exists and renders
+    Given the file man/netfyr-daemon.8 exists
+    When the developer runs "man ./man/netfyr-daemon.8"
+    Then the page renders without troff warnings
+    And the NAME section contains "netfyr-daemon"
+
+  Scenario: Daemon man page documents external change detection
+    Given the daemon man page is rendered
+    Then the EXTERNAL CHANGE DETECTION section explains:
+      | Only managed interfaces are monitored                    |
+      | Monitored properties (mtu, state, flags, IPv4 addresses) |
+      | Debounce window (500ms)                                  |
+      | No automatic re-reconciliation                           |
+
+  Scenario: Daemon man page documents the journal
+    Given the daemon man page is rendered
+    Then the JOURNAL section describes the NDJSON format
+    And it documents journal rotation and retention
+    And it references netfyr-history(1) and netfyr-revert(1)
+
+  Scenario: Daemon man page documents environment variables
+    Given the daemon man page is rendered
+    Then the ENVIRONMENT section lists NETFYR_SOCKET_PATH, NETFYR_POLICY_DIR,
+         NETFYR_JOURNAL_DIR, NETFYR_JOURNAL_MAX_ENTRIES, NETFYR_JOURNAL_MAX_SIZE,
+         and NETFYR_JOURNAL_RETENTION_DAYS
+
+  Scenario: External change detection example is accurate
+    Given the examples man page is rendered
+    Then the EXTERNAL CHANGE DETECTION section explains that a policy
+         must exist for the interface before changes are tracked
+    And the example shows the complete workflow: policy, apply, external
+         change, history
 
   Scenario: Man pages stay in sync with CLI
     Given a new --verbose flag is added to the apply command in clap

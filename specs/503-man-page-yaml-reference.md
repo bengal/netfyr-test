@@ -224,7 +224,8 @@ FILES
               Daemon-persisted policies (managed automatically).
 
 SEE ALSO
-       netfyr(1), netfyr-apply(1), netfyr-query(1), netfyr-examples(7)
+       netfyr(1), netfyr-apply(1), netfyr-query(1), netfyr-history(1),
+       netfyr-revert(1), netfyr-daemon(8), netfyr-examples(7)
 ```
 
 ### RPM integration
