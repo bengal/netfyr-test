@@ -155,7 +155,7 @@ The text format uses colored unified-diff style:
 - **Empty actual state**: All desired entities become Add operations (everything is new).
 - **Both empty**: Empty diff, `is_empty()` returns true.
 - **Identical states**: Empty diff, all entities listed in `unchanged_entities`.
-- **Read-only fields in actual but not in desired**: These are excluded from diff. Read-only fields (carrier, speed) are informational and not part of the desired state. They appear in query output but should not generate Modify operations.
+- **Read-only fields in actual but not in desired**: These are excluded from diff. Read-only fields (`carrier`, `speed`, `mac`, `driver`, `name`) are informational and not part of the desired state. They appear in query output but should not generate Modify operations. The set of read-only fields is defined in each entity type's JSON schema via the `x-netfyr-writable: false` annotation — every read-only field must be present in the schema with this annotation, or `generate_diff()` will treat it as writable.
 - **Unmanaged entities**: Entities present in the system but not targeted by any policy are completely invisible to the diff — they generate no operations and do not appear in `unchanged_entities`.
 
 ## Depends on
@@ -273,11 +273,17 @@ Feature: Diff generation between desired and actual state
     And the output contains a green line "      +10.0.1.51/24"
     And the output contains a red line "      -10.0.1.99/24"
 
-  Scenario: Read-only fields from actual state are excluded from diff
+  Scenario: All read-only fields from actual state are excluded from diff
     Given desired ethernet/eth0 with mtu=1500
-    And actual ethernet/eth0 with mtu=1500, carrier=true, speed=1000
+    And actual ethernet/eth0 with mtu=1500, carrier=true, speed=1000, mac="aa:bb:cc:dd:ee:ff", driver="virtio_net", name="eth0"
     When generate_diff is called
-    Then the StateDiff is empty (carrier and speed are read-only, not diffed)
+    Then the StateDiff is empty (carrier, speed, mac, driver, and name are all read-only, not diffed)
+
+  Scenario: Entity type schema declares all read-only fields
+    Given the ethernet entity type JSON schema
+    Then every field known to be read-only (carrier, speed, mac, driver, name) is present in the schema
+    And each of these fields has the annotation "x-netfyr-writable": false
+    And no read-only field is absent from the schema
 
   Scenario: Diff accessors filter by operation kind
     Given a StateDiff with 2 Add, 1 Modify, and 1 Remove operations
