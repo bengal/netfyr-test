@@ -48,7 +48,7 @@ Outcome: observed (no action taken)
 
 ### Netlink monitoring
 
-The daemon opens a second netlink socket (separate from the one used for queries and applies) subscribed to multicast groups for link and address notifications:
+The daemon opens a second netlink socket (separate from the one used for queries and applies) subscribed to multicast groups for link, address, and route notifications:
 
 ```rust
 // crates/netfyr-daemon/src/netlink_monitor.rs
@@ -75,11 +75,13 @@ pub enum ChangeKind {
     LinkChanged,      // IFLA attributes changed (mtu, state, etc.)
     AddressAdded,     // IPv4 address added
     AddressRemoved,   // IPv4 address removed
+    RouteAdded,       // IPv4 route added
+    RouteRemoved,     // IPv4 route removed
 }
 
 impl NetlinkMonitor {
     /// Start the netlink monitor.
-    /// Subscribes to RTNLGRP_LINK and RTNLGRP_IPV4_IFADDR.
+    /// Subscribes to RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, and RTNLGRP_IPV4_ROUTE.
     pub async fn start() -> Result<Self>;
 
     /// Receive the next coalesced change notification.
@@ -106,6 +108,7 @@ If the dump request fails, the monitor logs a warning and continues with an empt
 Subscribe to:
 - `RTNLGRP_LINK` (group 1) -- link creation, deletion, attribute changes (mtu, state, flags)
 - `RTNLGRP_IPV4_IFADDR` (group 5) -- IPv4 address additions and removals
+- `RTNLGRP_IPV4_ROUTE` (group 6) -- IPv4 route additions and removals
 
 These groups provide real-time notifications for all the fields netfyr manages on ethernet interfaces.
 
@@ -236,6 +239,18 @@ Feature: Netlink monitor
     When `ip addr del 10.99.0.2/24 dev veth-e2e0` is run externally
     Then a journal entry is recorded with trigger "external_change"
     And the entry's diff shows the address removal
+
+  Scenario: Monitor detects route addition
+    Given the daemon is running with veth-e2e0 managed
+    When `ip route add 10.99.0.0/24 dev veth-e2e0` is run externally
+    Then a journal entry is recorded with trigger "external_change"
+    And the entry's diff shows the route addition
+
+  Scenario: Monitor detects route removal
+    Given the daemon is running with veth-e2e0 having route 10.99.0.0/24
+    When `ip route del 10.99.0.0/24 dev veth-e2e0` is run externally
+    Then a journal entry is recorded with trigger "external_change"
+    And the entry's diff shows the route removal
 
   Scenario: Self-changes are excluded
     Given the daemon is running

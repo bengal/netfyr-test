@@ -140,9 +140,9 @@ impl DiffReport {
 ```
 
 The text format uses colored unified-diff style:
-- `+` prefix for additions (green in terminal).
-- `-` prefix for removals (red in terminal).
-- `~` prefix for modified entities (yellow in terminal).
+- `+` lines for additions (entire line green in terminal).
+- `-` lines for removals (entire line red in terminal).
+- `~` lines for modified entities (entire line yellow in terminal).
 - A leading space (no prefix) for unchanged elements shown for context.
 - Indentation for fields within an entity.
 - Scalar field changes show separate `-old` / `+new` lines (e.g., `-mtu: 1500` / `+mtu: 9000`).

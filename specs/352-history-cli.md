@@ -175,7 +175,7 @@ The `CHANGES` column shows a compact summary using this notation:
 - **List fields** (addresses, routes): `addr(+2)` (2 added), `addr(-1)` (1 removed), `addr(+1,-1)` (1 added, 1 removed), `routes(+3)` (3 added). Zero counts are omitted. List fields only have `+N` and `-N` counts, never `~`, because individual list elements are either present or absent.
 - **Entity-level operations**: `+entity` (new entity), `-entity` (entity removed).
 
-When color is enabled (see SPEC-301 for the global `--color` flag), the `+` prefix/count is green, `-` is red, and `~` is yellow. Colors reinforce but never replace the textual indicators — the output is unambiguous without color.
+When color is enabled (see SPEC-301 for the global `--color` flag), the entire `+` line is green, the entire `-` line is red, and `~` lines are yellow. Colors reinforce but never replace the textual indicators — the output is unambiguous without color.
 
 The CHANGES value is truncated with `...` when it would exceed the terminal width (or 120 characters if stdout is not a TTY).
 
