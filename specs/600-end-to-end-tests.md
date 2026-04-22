@@ -363,6 +363,22 @@ Verifies the daemon detects and journals external network changes without revert
 19. Verify `ip addr show veth-e2e0` shows only 10.99.0.2/24.
 20. Verify the daemon did not re-apply the original policy state at any point during the test.
 
+#### 28. Debug logging covers key decision points (`600-e2e-debug-logging.sh`)
+Verifies that debug-level messages appear for the main event flow:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon with `RUST_LOG=netfyr_daemon=debug`, capturing stderr to a file.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Run `ip link set veth-e2e0 mtu 1500` externally.
+6. Sleep 1s (debounce).
+7. Grep the daemon's stderr for:
+   - `RTM_GETLINK dump` (startup cache)
+   - `netlink event parsed` (message parsing)
+   - `debounce timer fired` (debounce drain)
+   - `recording external changes` (change recording)
+   - `diff computed` (reconciliation)
+8. Verify all 5 patterns are present.
+
 #### 27. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
@@ -388,6 +404,7 @@ Verifies that interfaces not targeted by any policy are left alone:
 - SPEC-401 (DHCP factory — needed for DHCP tests)
 - SPEC-402 (policy store — needed for persistence test)
 - SPEC-403 (daemon — needed for all daemon-mode tests)
+- SPEC-405 (daemon debug logging — needed for debug logging test)
 
 ## Integration test infrastructure
 This story produces only shell test scripts — no Rust code. All tests are shell scripts in `tests/`.
@@ -637,6 +654,18 @@ Feature: End-to-end external change detection
     Given a policy setting mtu=1400 was applied via the daemon
     When mtu, addresses are changed externally across multiple steps
     Then the daemon records each change but never re-applies the original state
+
+Feature: End-to-end debug logging
+  Scenario: Debug messages appear for external change flow
+    Given a namespace with a veth pair and the daemon started with RUST_LOG=netfyr_daemon=debug
+    And a policy setting mtu=1400 on veth-e2e0 has been applied
+    When `ip link set veth-e2e0 mtu 1500` is run externally
+    And 1 second passes (debounce window)
+    Then the daemon's stderr contains "RTM_GETLINK dump"
+    And the daemon's stderr contains "netlink event parsed"
+    And the daemon's stderr contains "debounce timer fired"
+    And the daemon's stderr contains "recording external changes"
+    And the daemon's stderr contains "diff computed"
 
 Feature: End-to-end unmanaged interfaces
   Scenario: Interfaces without policies are not modified
