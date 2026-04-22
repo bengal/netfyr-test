@@ -203,8 +203,9 @@ To record what changed externally, the daemon compares the current system state 
 
 1. For each entity in the current state, find its last snapshot in the journal.
 2. Compare field values. Any field that differs produces a `SerializableFieldChange` with `change_kind: "set"` and both `current` (old value from journal) and `desired` (new value from system).
-3. Entities in the journal but not in the current state produce "remove" operations.
-4. Entities in the current state but not in the journal are ignored (they might be unmanaged).
+3. Read-only fields (`carrier`, `speed`, `mac`, `driver`, `name` — the same set defined in `READONLY_FIELDS` in `crates/netfyr-backend/src/netlink/apply.rs`) are excluded from the comparison. These fields are reported by the backend query but are never set by policies, so the journal's `state_after` (which stores the desired state on policy-apply entries) will not contain them. Comparing them against the live query would produce spurious diffs (e.g., `+driver` every time).
+4. Entities in the journal but not in the current state produce "remove" operations.
+5. Entities in the current state but not in the journal are ignored (they might be unmanaged).
 
 ## Depends on
 
@@ -260,6 +261,11 @@ Feature: Netlink monitor
     When `ip addr add 10.99.0.2/24 dev veth-e2e0` is run externally
     Then a journal entry is recorded with trigger "external_change"
     And the entry's diff shows the address addition
+
+  Scenario: Read-only fields are excluded from external diffs
+    Given the daemon is running and has applied mtu=9000 to veth-e2e0
+    When `ip link set veth-e2e0 mtu 1500` is run externally
+    Then the journal entry's diff does not mention "driver", "carrier", "speed", "mac", or "name"
 
   Scenario: Monitor ignores unmanaged interfaces
     Given the daemon is running with policies only for veth-e2e0
