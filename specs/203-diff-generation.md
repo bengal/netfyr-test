@@ -21,10 +21,12 @@ The diff is the bridge between the pure declarative world (desired state from re
 -   parent: bond0
 
 ~ ethernet eth0                          # Modify: entity exists in both, fields differ
-~   mtu: 1500 → 9000
-+   addresses: [10.0.1.51/24]            # Field added
--   addresses: [10.0.1.99/24]            # Field removed
-    addresses: [10.0.1.50/24]            # Field unchanged (shown for context)
+    -mtu: 1500                           # Scalar: separate lines for old/new
+    +mtu: 9000
+    addresses:                           # List: per-element unified diff
+      +10.0.1.51/24                      #   element added
+      -10.0.1.99/24                      #   element removed
+       10.0.1.50/24                      #   element unchanged (context)
 
 No changes: bond bond0, dns global       # Entities that match desired state
 ```
@@ -137,13 +139,14 @@ impl DiffReport {
 }
 ```
 
-The text format uses:
+The text format uses colored unified-diff style:
 - `+` prefix for additions (green in terminal).
 - `-` prefix for removals (red in terminal).
-- `~` prefix for modifications (yellow in terminal).
-- No prefix for unchanged fields shown for context.
+- `~` prefix for modified entities (yellow in terminal).
+- A leading space (no prefix) for unchanged elements shown for context.
 - Indentation for fields within an entity.
-- `→` arrow for value changes (e.g., `mtu: 1500 → 9000`).
+- Scalar field changes show separate `-old` / `+new` lines (e.g., `-mtu: 1500` / `+mtu: 9000`).
+- List field changes (addresses, routes) show a field-name header followed by per-element lines prefixed with `+` (added), `-` (removed), or ` ` (unchanged context). Only changed elements are required; unchanged elements may be shown for context. Route elements use the format `destination metric N` (omitting metric when 0).
 
 ### Edge cases
 
@@ -255,10 +258,20 @@ Feature: Diff generation between desired and actual state
     When format_text() is called
     Then the output contains "- vlan bond0.200"
 
-  Scenario: Human-readable format shows modifications with arrow
+  Scenario: Human-readable format shows scalar modifications as unified diff lines
     Given a StateDiff with a Modify operation changing mtu from 1500 to 9000
     When format_text() is called
-    Then the output contains "~   mtu: 1500 → 9000"
+    Then the output contains a red line "    -mtu: 1500"
+    And the output contains a green line "    +mtu: 9000"
+
+  Scenario: Human-readable format shows list field changes as per-element diff
+    Given a StateDiff with a Modify operation where addresses changed
+    And the old value is ["10.0.1.50/24","10.0.1.99/24"]
+    And the new value is ["10.0.1.50/24","10.0.1.51/24"]
+    When format_text() is called
+    Then the output contains a field header "    addresses:"
+    And the output contains a green line "      +10.0.1.51/24"
+    And the output contains a red line "      -10.0.1.99/24"
 
   Scenario: Read-only fields from actual state are excluded from diff
     Given desired ethernet/eth0 with mtu=1500

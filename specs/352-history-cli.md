@@ -65,13 +65,28 @@ Active policies:
   - eth0-dhcp (dhcpv4, priority 100)
 Diff:
   ~ ethernet eth0
-      mtu: 1500 -> 9000
+      -mtu: 1500
+      +mtu: 9000
 Outcome: applied (1 succeeded, 0 failed, 0 skipped)
 State after:
   ethernet eth0:
     mtu: 9000
     addresses: [10.0.1.50/24]
     carrier: true
+```
+
+The diff section uses unified-diff style (see SPEC-203 for the full format definition):
+- Scalar field changes show separate red (`-old`) and green (`+new`) lines.
+- List field changes (addresses, routes) show a field-name header followed by per-element `+`/`-` lines. Only changed elements are shown; unchanged elements are omitted. Route elements use the format `destination metric N` (omitting metric when 0).
+
+Example with list field changes:
+```
+Diff:
+  ~ ethernet enp7s0
+      addresses:
+        +172.25.14.22/32
+      routes:
+        +172.25.14.22/32 metric 0
 ```
 
 #### JSON output (`-o json`)
@@ -164,7 +179,7 @@ When color is enabled (see SPEC-301 for the global `--color` flag), the `+` pref
 
 The CHANGES value is truncated with `...` when it would exceed the terminal width (or 120 characters if stdout is not a TTY).
 
-The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. Diff output in `--show` also uses colors when enabled.
+The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, `+` lines are green and `-` lines are red.
 
 ### Varlink API additions
 
@@ -275,6 +290,25 @@ Feature: History detail command
     Given a journal with entry seq=42
     When `netfyr history --show 42` is run
     Then the output shows the full entry including trigger details, active policies, diff, outcome, and state snapshot
+
+  Scenario: Detail diff shows scalar change as unified-diff lines
+    Given a journal entry where mtu changed from 1500 to 9000 on ethernet eth0
+    When `netfyr history --show <seq>` is run
+    Then the diff section contains a line "      -mtu: 1500"
+    And the diff section contains a line "      +mtu: 9000"
+
+  Scenario: Detail diff shows list field additions as per-element lines
+    Given a journal entry where address 172.25.14.22/32 was added to ethernet enp7s0
+    When `netfyr history --show <seq>` is run
+    Then the diff section contains a line "      addresses:"
+    And the diff section contains a line "        +172.25.14.22/32"
+    And unchanged addresses are not shown
+
+  Scenario: Detail diff shows route changes with readable format
+    Given a journal entry where route 10.0.0.0/8 metric 100 was added to ethernet eth0
+    When `netfyr history --show <seq>` is run
+    Then the diff section contains a line "      routes:"
+    And the diff section contains a line "        +10.0.0.0/8 metric 100"
 
   Scenario: Show nonexistent entry
     When `netfyr history --show 9999` is run
