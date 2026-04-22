@@ -91,6 +91,16 @@ impl NetlinkMonitor {
 }
 ```
 
+### Startup cache pre-population
+
+`RTM_NEWADDR` messages carry only `ifindex`, not `ifname`. The monitor resolves names from an internal `name_cache: HashMap<u32, String>`, populated only when `RTM_NEWLINK` messages arrive. After a daemon restart, this cache is empty. If no link attribute change occurs before an address change, the cache has no mapping and the address event is silently dropped (the `ifname` field is `None`, and the event loop's `.filter_map(|c| c.ifname)` skips it).
+
+To ensure the cache is populated from the start, the monitor sends an `RTM_GETLINK` dump request (`NLM_F_REQUEST | NLM_F_DUMP`) on the same `netlink_sys::Socket` during initialization. This is done while the socket is still in blocking mode (before `set_non_blocking(true)`), after `bind_auto()` but before `add_membership()`. Each response message is parsed with the existing `parse_link_message()` function to extract `(ifindex, ifname)` pairs into the cache.
+
+The startup sequence is: `bind_auto()` → `RTM_GETLINK` dump (blocking) → `set_non_blocking(true)` → `add_membership()` for multicast groups.
+
+If the dump request fails, the monitor logs a warning and continues with an empty cache. This is non-fatal — the cache will still be populated by subsequent `RTM_NEWLINK` messages during normal operation, though address-only changes on interfaces that haven't had a link event will be missed until one occurs.
+
 ### Netlink multicast groups
 
 Subscribe to:
@@ -243,6 +253,13 @@ Feature: Netlink monitor
     When `ip link set veth-e2e0 mtu 1500` is run externally
     Then the daemon records the change but does not re-apply mtu=9000
     And veth-e2e0 retains mtu=1500
+
+  Scenario: Address change detected after daemon restart
+    Given the daemon is running and has applied address 10.99.0.1/24 to veth-e2e0
+    And the daemon is restarted (without any link attribute changes occurring)
+    When `ip addr add 10.99.0.2/24 dev veth-e2e0` is run externally
+    Then a journal entry is recorded with trigger "external_change"
+    And the entry's diff shows the address addition
 
   Scenario: Monitor ignores unmanaged interfaces
     Given the daemon is running with policies only for veth-e2e0

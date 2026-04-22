@@ -43,13 +43,15 @@ netfyr history -s name=eth0 --since 7d --trigger apply -o json
 #### Text list (default)
 
 ```
-SEQ  TIMESTAMP             TRIGGER         ENTITIES       OUTCOME            CHANGES
-142  2026-04-20 14:30:00   policy-apply    eth0           applied (1 ok)     ~mtu
-141  2026-04-20 14:15:32   dhcp-lease      eth0           applied (1 ok)     addr(+1)
-140  2026-04-20 14:10:00   external        eth1           observed           ~mtu
-139  2026-04-20 14:00:00   daemon-startup  eth0, eth1     applied (2 ok)     +2 entities
-138  2026-04-20 13:45:00   policy-apply    eth0           applied (2 ok)     ~mtu, addr(+1)
+SEQ  TIMESTAMP             TRIGGER         ENTITIES       OUTCOME          CHANGES
+142  2026-04-20 14:30:00   policy-apply    eth0           applied          ~mtu
+141  2026-04-20 14:15:32   dhcp-lease      eth0           applied          addr(+1)
+140  2026-04-20 14:10:00   external        eth1           observed         ~mtu
+139  2026-04-20 14:00:00   daemon-startup  eth0, eth1     applied          +2 entities
+138  2026-04-20 13:45:00   policy-apply    eth0           applied (1 fail) ~mtu, addr(+1)
 ```
+
+The `OUTCOME` column in list view shows only the outcome kind (`applied`, `observed`). A failure count is appended only when failures occurred: `applied (N fail)`. Success and skip counts are omitted — they add noise in the common case and the detail view (`--show`) has the full breakdown. The column has a fixed width of 17 characters, enough for `applied (N fail)` with reasonable entity counts. If the text exceeds the column width (e.g., very large failure counts), it is truncated with `…`.
 
 The CHANGES column is placed last so it can use all remaining terminal width. When the line would exceed the terminal width (or 120 characters if stdout is not a TTY), the CHANGES value is truncated with `...`. Full details are available via `--show <seq>`.
 
@@ -151,7 +153,7 @@ Filters combine with AND logic.
 
 The list format uses fixed-width columns for all columns except CHANGES, which is placed last and uses all remaining terminal width. The column order is: SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, CHANGES.
 
-The `ENTITIES` column shows a comma-separated list of entity names from the diff operations (truncated with `+N more` if too many).
+The `ENTITIES` column has a fixed width of 25 characters — enough for one maximum-length Linux interface name (15 chars) plus the `+N more` suffix. It shows a comma-separated list of entity names from the diff operations. If the text would exceed the column width, it is truncated with `+N more` (e.g., `enp7s0, +2 more`).
 
 The `CHANGES` column shows a compact summary using this notation:
 - **Scalar fields** (mtu, carrier, state, driver, mac, name): `+field` (set), `~field` (changed), `-field` (removed).
