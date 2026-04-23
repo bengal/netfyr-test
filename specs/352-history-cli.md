@@ -179,7 +179,7 @@ When color is enabled (see SPEC-301 for the global `--color` flag), the entire `
 
 The CHANGES value is truncated with `...` when it would exceed the terminal width (or 120 characters if stdout is not a TTY).
 
-The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, `+` lines are green and `-` lines are red.
+The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, the entire `+` line is green and the entire `-` line is red (not just the `+`/`-` prefix character — the field name and value are colored too).
 
 ### Varlink API additions
 
@@ -296,6 +296,13 @@ Feature: History detail command
     When `netfyr history --show <seq>` is run
     Then the diff section contains a line "      -mtu: 1500"
     And the diff section contains a line "      +mtu: 9000"
+
+  Scenario: Detail diff colors entire lines, not just the prefix
+    Given a journal entry where mtu changed from 1500 to 9000 on ethernet eth0
+    When `netfyr history --show <seq> --color always` is run
+    Then the "-mtu: 1500" line is entirely red (ANSI red wraps the full line including field name and value)
+    And the "+mtu: 9000" line is entirely green (ANSI green wraps the full line including field name and value)
+    And the color does not apply only to the "+" or "-" character
 
   Scenario: Detail diff shows list field additions as per-element lines
     Given a journal entry where address 172.25.14.22/32 was added to ethernet enp7s0
