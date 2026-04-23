@@ -361,7 +361,27 @@ Verifies the daemon detects and journals external network changes without revert
 17. Verify a new journal entry with trigger `"external_change"` was recorded.
 18. Verify the entry's diff shows the address removal.
 19. Verify `ip addr show veth-e2e0` shows only 10.99.0.2/24.
-20. Verify the daemon did not re-apply the original policy state at any point during the test.
+20. **External route addition**: run `ip route add 10.99.0.0/24 dev veth-e2e0`.
+21. Sleep 1s.
+22. Verify a new journal entry with trigger `"external_change"` was recorded.
+23. Verify the entry's diff shows the route addition.
+24. **External route removal**: run `ip route del 10.99.0.0/24 dev veth-e2e0`.
+25. Sleep 1s.
+26. Verify a new journal entry with trigger `"external_change"` was recorded.
+27. Verify the entry's diff shows the route removal.
+28. **Multiple routes added at once**: run `ip route add 10.99.1.0/24 dev veth-e2e0` and `ip route add 10.99.2.0/24 dev veth-e2e0`.
+29. Sleep 1s.
+30. Verify a single journal entry with trigger `"external_change"` is recorded (debounce coalesces).
+31. Verify the entry's diff shows both route additions.
+32. **Mixed address and route changes**: run `ip addr add 10.99.0.3/24 dev veth-e2e0` and `ip route add 10.99.3.0/24 dev veth-e2e0` in quick succession.
+33. Sleep 1s.
+34. Verify a journal entry with trigger `"external_change"` is recorded.
+35. Verify the entry's diff shows both the address addition and the route addition.
+36. **Mixed additions and removals**: run `ip route del 10.99.1.0/24 dev veth-e2e0` and `ip route add 10.99.4.0/24 dev veth-e2e0` in quick succession.
+37. Sleep 1s.
+38. Verify a journal entry with trigger `"external_change"` is recorded.
+39. Verify the entry's diff shows the route removal and the route addition.
+40. Verify the daemon did not re-apply the original policy state at any point during the test.
 
 #### 28. Debug logging covers key decision points (`600-e2e-debug-logging.sh`)
 Verifies that debug-level messages appear for the main event flow:
@@ -650,9 +670,44 @@ Feature: End-to-end external change detection
     And the entry's diff shows the address removal
     And veth-e2e0 has only 10.99.0.2/24
 
+  Scenario: Daemon detects external route addition
+    Given the daemon is running with veth-e2e0 managed
+    When `ip route add 10.99.0.0/24 dev veth-e2e0` is run externally
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows the route addition
+
+  Scenario: Daemon detects external route removal
+    Given veth-e2e0 has route 10.99.0.0/24
+    When `ip route del 10.99.0.0/24 dev veth-e2e0` is run externally
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows the route removal
+
+  Scenario: Daemon detects multiple routes added at once
+    Given the daemon is running with veth-e2e0 managed
+    When `ip route add 10.99.1.0/24 dev veth-e2e0` and `ip route add 10.99.2.0/24 dev veth-e2e0` are run in quick succession
+    And 1 second passes
+    Then a single journal entry with trigger "external_change" is recorded (coalesced)
+    And the entry's diff shows both route additions
+
+  Scenario: Daemon detects mixed address and route changes
+    Given the daemon is running with veth-e2e0 managed
+    When `ip addr add 10.99.0.3/24 dev veth-e2e0` and `ip route add 10.99.3.0/24 dev veth-e2e0` are run in quick succession
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows both the address addition and the route addition
+
+  Scenario: Daemon detects mixed route additions and removals
+    Given veth-e2e0 has routes 10.99.1.0/24 and 10.99.2.0/24
+    When `ip route del 10.99.1.0/24 dev veth-e2e0` and `ip route add 10.99.4.0/24 dev veth-e2e0` are run in quick succession
+    And 1 second passes
+    Then a journal entry with trigger "external_change" is recorded
+    And the entry's diff shows the route removal and the route addition
+
   Scenario: Daemon does not re-apply policy after external changes
     Given a policy setting mtu=1400 was applied via the daemon
-    When mtu, addresses are changed externally across multiple steps
+    When mtu, addresses, and routes are changed externally across multiple steps
     Then the daemon records each change but never re-applies the original state
 
 Feature: End-to-end debug logging

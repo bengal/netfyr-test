@@ -205,8 +205,8 @@ Some(changes) = netlink_monitor.next_change() => {
 To record what changed externally, the daemon compares the current system state against the last known state from the journal. The `compute_external_diff` function:
 
 1. For each entity in the current state, find its last snapshot in the journal.
-2. Compare field values. Any field that differs produces a `SerializableFieldChange` with `change_kind: "set"` and both `current` (old value from journal) and `desired` (new value from system).
-3. Read-only fields (`carrier`, `speed`, `mac`, `driver`, `name` — the same set defined in `READONLY_FIELDS` in `crates/netfyr-backend/src/netlink/apply.rs`) are excluded from the comparison. These fields are reported by the backend query but are never set by policies, so the journal's `state_after` (which stores the desired state on policy-apply entries) will not contain them. Comparing them against the live query would produce spurious diffs (e.g., `+driver` every time).
+2. Compare field values. Any field that differs produces a `SerializableFieldChange` with `change_kind: "set"` and both `current` (old value from journal) and `desired` (new value from system). This applies to both scalar fields (e.g., `mtu`) and list fields (e.g., `addresses`, `routes`). The backend query (SPEC-102) returns routes via `RTM_GETROUTE` dump filtered by output interface, so the current state always includes the `routes` field for managed interfaces.
+3. Read-only fields (`carrier`, `speed`, `mac`, `driver`, `name`, `operstate` — the same set defined in `READONLY_FIELDS` in `crates/netfyr-backend/src/netlink/apply.rs`) are excluded from the comparison. These fields are reported by the backend query but are never set by policies, so the journal's `state_after` (which stores the desired state on policy-apply entries) will not contain them. Comparing them against the live query would produce spurious diffs (e.g., `+driver` every time).
 4. Entities in the journal but not in the current state produce "remove" operations.
 5. Entities in the current state but not in the journal are ignored (they might be unmanaged).
 
@@ -240,18 +240,6 @@ Feature: Netlink monitor
     Then a journal entry is recorded with trigger "external_change"
     And the entry's diff shows the address removal
 
-  Scenario: Monitor detects route addition
-    Given the daemon is running with veth-e2e0 managed
-    When `ip route add 10.99.0.0/24 dev veth-e2e0` is run externally
-    Then a journal entry is recorded with trigger "external_change"
-    And the entry's diff shows the route addition
-
-  Scenario: Monitor detects route removal
-    Given the daemon is running with veth-e2e0 having route 10.99.0.0/24
-    When `ip route del 10.99.0.0/24 dev veth-e2e0` is run externally
-    Then a journal entry is recorded with trigger "external_change"
-    And the entry's diff shows the route removal
-
   Scenario: Self-changes are excluded
     Given the daemon is running
     When a policy is submitted that changes mtu on veth-e2e0
@@ -276,6 +264,24 @@ Feature: Netlink monitor
     When `ip addr add 10.99.0.2/24 dev veth-e2e0` is run externally
     Then a journal entry is recorded with trigger "external_change"
     And the entry's diff shows the address addition
+
+  Scenario: Monitor detects route addition
+    Given the daemon is running with veth-e2e0 managed
+    When `ip route add 10.99.1.0/24 via 10.99.0.254 dev veth-e2e0` is run externally
+    Then a journal entry is recorded with trigger "external_change"
+    And the entry's diff shows the route addition
+
+  Scenario: Monitor detects route removal
+    Given veth-e2e0 has route 10.99.1.0/24
+    When `ip route del 10.99.1.0/24 dev veth-e2e0` is run externally
+    Then a journal entry is recorded with trigger "external_change"
+    And the entry's diff shows the route removal
+
+  Scenario: Route and address changes are coalesced
+    Given the daemon is running with veth-e2e0 managed
+    When `ip addr add 10.99.0.3/24 dev veth-e2e0` and `ip route add 10.99.3.0/24 dev veth-e2e0` are run in quick succession
+    Then a single journal entry is recorded with trigger "external_change"
+    And the entry's diff shows both the address addition and the route addition
 
   Scenario: Read-only fields are excluded from external diffs
     Given the daemon is running and has applied mtu=9000 to veth-e2e0
