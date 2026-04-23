@@ -280,6 +280,23 @@ Verifies `netfyr history --show` displays full entry detail:
 5. Verify the output shows the trigger type.
 6. Verify the output shows the diff (mtu change).
 7. Verify the output shows the outcome.
+8. Verify the "State after" section uses the same YAML format as `netfyr query`:
+   - Contains `- type: ethernet` (YAML sequence element with type field).
+   - Contains `  name: veth-e2e0`.
+   - Contains `  mtu: 1400`.
+   - Addresses (if present) are listed as a YAML block sequence (`- addr` per line), not a JSON array.
+   - Does NOT contain JSON-style inline arrays like `["..."]` or inline objects like `{"..."}`.
+
+#### 19b. History show state-after format matches query (`600-e2e-history-state-format.sh`)
+Verifies that `netfyr history --show` state-after section matches `netfyr query` YAML output:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Add address `10.99.0.1/24` to `veth-e2e0`.
+3. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+4. Apply a policy setting mtu=1400 and addresses=`["10.99.0.1/24"]` on `veth-e2e0`.
+5. Run `netfyr query -s name=veth-e2e0` and capture the YAML output.
+6. Run `netfyr history --show 1` and extract the "State after" section (everything after the `State after:` line).
+7. Verify the state-after YAML structure matches the query output: same field names, same block-style formatting for lists, same field ordering.
+8. Specifically verify addresses appear as `- 10.99.0.1/24` (block sequence), not `["10.99.0.1/24"]` (JSON array).
 
 #### 20. History JSON output (`600-e2e-history-json.sh`)
 Verifies `netfyr history -o json` produces valid JSON:
@@ -597,6 +614,15 @@ Feature: End-to-end history show
     Given a namespace with a veth pair and a journal with one entry
     When `netfyr history --show 1` is run
     Then the output shows the trigger, diff, and outcome
+    And the "State after" section contains "- type: ethernet" and "  name: veth-e2e0"
+    And the "State after" section does not contain JSON-style inline arrays or objects
+
+  Scenario: History --show state-after format matches query output
+    Given a namespace with a veth pair, address 10.99.0.1/24, and a journal with one apply entry
+    When `netfyr query -s name=veth-e2e0` YAML output is captured
+    And `netfyr history --show 1` is run
+    Then the "State after" section uses the same YAML block-style format as the query output
+    And addresses appear as a YAML block sequence ("- 10.99.0.1/24"), not a JSON array
 
 Feature: End-to-end history JSON
   Scenario: History -o json produces valid JSON

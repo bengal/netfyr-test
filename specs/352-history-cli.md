@@ -77,12 +77,15 @@ Diff:
       +mtu: 9000
 Outcome: applied (1 succeeded, 0 failed, 0 skipped)
 State after:
-  ethernet eth0:
-    mtu: 9000
-    addresses:
-      - 10.0.1.50/24
-    carrier: true
+- type: ethernet
+  name: eth0
+  mtu: 9000
+  addresses:
+    - 10.0.1.50/24
+  carrier: true
 ```
+
+The "State after" section uses exactly the same YAML format as `netfyr query` output (see SPEC-302): a YAML sequence where each element has `type`, selector properties, and configuration fields at the top level. This means the same serialization code used for `netfyr query` must be reused for the state-after section of `--show`.
 
 The diff section uses unified-diff style (see SPEC-203 for the full format definition):
 - Scalar field changes show separate red (`-old`) and green (`+new`) lines.
@@ -191,6 +194,8 @@ When color is enabled (see SPEC-301 for the global `--color` flag), the entire `
 The CHANGES value is truncated with `...` when it would exceed the terminal width (or 120 characters if stdout is not a TTY).
 
 The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, the entire `+` line is green and the entire `-` line is red (not just the `+`/`-` prefix character — the field name and value are colored too).
+
+The "State after" section must use exactly the same YAML serialization as `netfyr query` (SPEC-302): a YAML block-style sequence where each element has `type`, selector properties, and configuration fields at the top level. Lists (addresses, routes) use YAML block sequences, never JSON-style inline arrays or objects. The implementation must reuse the same serialization code path as `netfyr query` to guarantee format consistency.
 
 ### Varlink API additions
 
@@ -301,6 +306,16 @@ Feature: History detail command
     Given a journal with entry seq=42
     When `netfyr history --show 42` is run
     Then the output shows the full entry including trigger details, active policies, diff, outcome, and state snapshot
+    And the "State after" section uses the same YAML format as `netfyr query` output (SPEC-302)
+
+  Scenario: State-after format matches query output
+    Given a journal entry for ethernet eth0 with mtu=9000, addresses=["10.0.1.50/24"], carrier=true
+    When `netfyr history --show <seq>` is run
+    Then the "State after" section contains "- type: ethernet"
+    And it contains "  name: eth0"
+    And it contains "  mtu: 9000"
+    And addresses are listed as a YAML block sequence (one "- addr" per line), not a JSON array
+    And routes are listed as a YAML block sequence with destination/gateway/metric fields, not JSON objects
 
   Scenario: Detail diff shows scalar change as unified-diff lines
     Given a journal entry where mtu changed from 1500 to 9000 on ethernet eth0
