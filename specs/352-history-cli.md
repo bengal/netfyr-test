@@ -31,6 +31,12 @@ netfyr history -s name=eth0
 # Show full details for a specific entry
 netfyr history --show 142
 
+# Show the most recent entry
+netfyr history --show -1
+
+# Show the third-to-last entry
+netfyr history --show -3
+
 # JSON output (for piping to jq)
 netfyr history -o json
 
@@ -57,6 +63,8 @@ The CHANGES column is placed last so it can use all remaining terminal width. Wh
 
 #### Text detail (`--show <seq>`)
 
+The `<seq>` argument accepts a positive sequence number or a negative offset from the end: `-1` is the most recent entry, `-2` is the second-to-last, etc.
+
 ```
 Entry #142 at 2026-04-20 14:30:00 UTC
 Trigger: policy-apply (source: /etc/netfyr/policies/)
@@ -71,7 +79,8 @@ Outcome: applied (1 succeeded, 0 failed, 0 skipped)
 State after:
   ethernet eth0:
     mtu: 9000
-    addresses: [10.0.1.50/24]
+    addresses:
+      - 10.0.1.50/24
     carrier: true
 ```
 
@@ -126,8 +135,10 @@ struct HistoryArgs {
     selector: Vec<(String, String)>,
 
     /// Show full detail for a single entry by sequence ID.
-    #[arg(long)]
-    show: Option<u64>,
+    /// Positive values are absolute sequence numbers.
+    /// Negative values count from the end: -1 is the most recent entry.
+    #[arg(long, allow_hyphen_values = true)]
+    show: Option<i64>,
 
     /// Output format: "text" (default), "json".
     #[arg(long, short = 'o', default_value = "text")]
@@ -316,6 +327,22 @@ Feature: History detail command
     When `netfyr history --show <seq>` is run
     Then the diff section contains a line "      routes:"
     And the diff section contains a line "        +10.0.0.0/8 metric 100"
+
+  Scenario: Show most recent entry with negative offset
+    Given a journal with 30 entries (seq 1 through 30)
+    When `netfyr history --show -1` is run
+    Then the output shows the full detail for entry seq=30
+
+  Scenario: Show Nth-to-last entry with negative offset
+    Given a journal with 30 entries (seq 1 through 30)
+    When `netfyr history --show -3` is run
+    Then the output shows the full detail for entry seq=28
+
+  Scenario: Negative offset beyond journal size
+    Given a journal with 5 entries
+    When `netfyr history --show -10` is run
+    Then the output shows "Entry not found"
+    And the exit code is 1
 
   Scenario: Show nonexistent entry
     When `netfyr history --show 9999` is run
