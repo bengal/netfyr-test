@@ -323,9 +323,9 @@ INVESTIGATING CHANGES WITH HISTORY
        List recent state changes from the journal:
 
            $ netfyr history
-           SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
-           145  2026-04-20 15:10:05   external        eth0       observed       ~mtu
-           144  2026-04-20 15:00:00   policy-apply    eth0       applied (1 ok) ~mtu
+           SEQ  TIMESTAMP              TRIGGER       ENTITIES  CHANGES
+           145  2026-04-20 15:10:05    external      eth0      mtu 1400→1500
+           144  2026-04-20 15:00:00    policy-apply  eth0      mtu 1500→1400
 
        Show full details for a specific entry:
 
@@ -364,8 +364,8 @@ EXTERNAL CHANGE DETECTION
 
               $ ip link set eth0 mtu 1500
               $ netfyr history -n 1
-              SEQ  TIMESTAMP             TRIGGER    ENTITIES  OUTCOME   CHANGES
-              146  2026-04-20 15:15:00   external   eth0      observed  ~mtu
+              SEQ  TIMESTAMP              TRIGGER   ENTITIES  CHANGES
+              146  2026-04-20 15:15:00    external  eth0      mtu 1400→1500
 
        Important: only interfaces targeted by at least one active policy
        are monitored. If you want to track changes to an interface, you
@@ -378,10 +378,10 @@ REVERTING TO A PREVIOUS STATE
        good state:
 
            $ netfyr history -n 3
-           SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
-           146  2026-04-20 15:15:00   external        eth0       observed       ~mtu
-           145  2026-04-20 15:10:05   policy-apply    eth0       applied (1 ok) ~mtu
-           144  2026-04-20 15:00:00   policy-apply    eth0       applied (2 ok) ~mtu, addr(+1)
+           SEQ  TIMESTAMP              TRIGGER       ENTITIES  CHANGES
+           146  2026-04-20 15:15:00    external      eth0      mtu 1400→1500
+           145  2026-04-20 15:10:05    policy-apply  eth0      mtu 1500→1400
+           144  2026-04-20 15:00:00    policy-apply  eth0      mtu 1500→1400, +10.0.1.50/24
 
            $ netfyr revert 145 --dry-run
            Reverting to state from entry #145 (2026-04-20 15:10:05 UTC)

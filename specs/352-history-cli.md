@@ -52,29 +52,29 @@ netfyr history -s name=eth0 --since 7d --trigger apply -o json
 #### Text list (default)
 
 ```
-SEQ TIMESTAMP       TRIGGER              ENTITIES       OUTCOME          CHANGES
-142 30 min ago      apply (eth0-static)  eth0           applied          mtu 1500→9000
-141 45 min ago      dhcp-acquire         eth0           applied          +10.0.1.50/24
-140 50 min ago      external             eth1           observed         mtu 1400→1500
-139 1h ago          daemon-startup       +eth0, +eth1   applied          +eth0, +eth1
-138 1h ago          apply (eth0-st…, +1) eth0           applied (1 fail) mtu 1400→9000, +10.0.1.50/24
-─── daemon restart ───
-137 yesterday 12:30 external             eth0, sys:dns  observed         +192.168.1.100/24, +ns 8.8.8.8
-136 yesterday 12:28 external             eth0           observed         mtu 1400→1500, +10.0.1.51/24
-135 yesterday 12:27 external             eth0           observed         +10.0.1.50/24, +3 routes
-134 yesterday 12:25 external             eth0           observed         -10.0.1.99/24
-133 yesterday 12:22 external             eth0           observed         +10.0.1.51/24 (+2 addrs)
-132 yesterday 12:20 external             eth0           observed         +10.0.1.50/24
-131 yesterday 12:15 daemon-startup       eth0           applied          -10.0.1.99/24, -3 routes
+SEQ  TIMESTAMP        TRIGGER               ENTITIES        CHANGES
+142  30 min ago       apply (eth0-static)   eth0            mtu 1500→9000
+141  45 min ago       dhcp-acquire          eth0            +10.0.1.50/24
+140  50 min ago       external              eth1            mtu 1400→1500
+139  1h ago           daemon-startup        +eth0, +eth1    +eth0, +eth1
+138  1h ago           apply (eth0-st…, +1)  eth0            FAIL mtu 1400→9000, +10.0.1.50/24
+──── daemon restart ────
+137  yesterday 12:30  external              eth0, sys:dns   +192.168.1.100/24, +ns 8.8.8.8
+136  yesterday 12:28  external              eth0            mtu 1400→1500, +10.0.1.51/24
+135  yesterday 12:27  external              eth0            +10.0.1.50/24, +3 routes
+134  yesterday 12:25  external              eth0            -10.0.1.99/24
+133  yesterday 12:22  external              eth0            +10.0.1.51/24 (+2 addrs)
+132  yesterday 12:20  external              eth0            +10.0.1.50/24
+131  yesterday 12:15  daemon-startup        eth0            -10.0.1.99/24, -3 routes
 ```
 
 **Relative timestamps**: entries from today show relative durations (`2 min ago`, `1h ago`), yesterday's entries show `yesterday HH:MM`, and older entries show the full date (`2026-04-18 14:30`).
 
-**Daemon-startup separators**: a `─── daemon restart ───` line is inserted after each entry whose trigger is `daemon-startup`, visually separating daemon lifecycle sessions. The separator appears between the daemon-startup row and the row above it (which belongs to the previous session).
+**Daemon-startup separators**: a `──── daemon restart ────` line is inserted after each entry whose trigger is `daemon-startup`, visually separating daemon lifecycle sessions. The separator appears between the daemon-startup row and the row above it (which belongs to the previous session).
 
-**Dynamic column widths**: each column width is computed as `max(header_width, widest_value)`, capped at a per-column maximum. Values exceeding the cap are truncated with `…`. The CHANGES column (rightmost) has no maximum and uses all remaining terminal width. See the Text formatting section for max width values.
+**Dynamic column widths**: each column width is computed as `max(header_width, widest_value)`, capped at a per-column maximum. Values exceeding the cap are truncated with `…`. The CHANGES column (rightmost) has no maximum and uses all remaining terminal width. See the Text formatting section for max width values. Columns are separated by two spaces for readability.
 
-The `OUTCOME` column in list view shows only the outcome kind (`applied`, `observed`). A failure count is appended only when failures occurred: `applied (N fail)`. Success and skip counts are omitted — they add noise in the common case and the detail view (`--show`) has the full breakdown.
+There is no OUTCOME column in the list view. The outcome is fully determined by the trigger: `ExternalChange` always produces `Observed`, and all other triggers produce `Applied`. When an apply has failures, the CHANGES column is prefixed with `FAIL`: e.g., `FAIL mtu 1400→9000`. The detail view (`--show`) still shows the full outcome breakdown.
 
 The CHANGES column is placed last so it can use all remaining terminal width. When the line would exceed the terminal width (or 120 characters if stdout is not a TTY), the CHANGES value is truncated with `…`. Full details are available via `--show <seq>`.
 
@@ -209,14 +209,13 @@ Column order and maximum widths:
 
 | Column    | Max width | Notes |
 |-----------|-----------|-------|
-| SEQ       | 5         | |
+| SEQ       | 7         | Enough for 7-digit sequence numbers |
 | TIMESTAMP | 20        | Enough for `yesterday HH:MM` and relative durations |
-| TRIGGER   | 14        | Enough for `daemon-startup`; `apply (…)` and `revert (N)` truncate at cap |
+| TRIGGER   | 24        | Enough for `apply (policy-name)` without truncation in most cases |
 | ENTITIES  | 24        | Enough for one max-length interface name (15) + lifecycle prefix + `(+N more)` |
-| OUTCOME   | 17        | Enough for `applied (N fail)` |
 | CHANGES   | unlimited | Uses all remaining terminal width |
 
-When the CHANGES value would exceed the terminal width (or 120 characters if stdout is not a TTY), it is truncated with `…`.
+Columns are separated by two spaces. When the CHANGES value would exceed the terminal width (or 120 characters if stdout is not a TTY), it is truncated with `…`.
 
 #### TRIGGER column
 
@@ -236,7 +235,7 @@ For DHCP events, the `event_kind` field (`lease_acquired`, `lease_renewed`, `lea
 
 For `revert`, the parenthesized value is the target sequence number being reverted to.
 
-When the trigger text exceeds the column's max width (14 chars), it is truncated with `…`: `apply (eth0-s…`.
+When the trigger text exceeds the column's max width (24 chars), it is truncated with `…`.
 
 #### Timestamps
 
@@ -288,7 +287,7 @@ When color is enabled (see SPEC-301 for the global `--color` flag), added values
 
 #### Daemon-startup separators
 
-A visual separator `─── daemon restart ───` is inserted between daemon lifecycle sessions. The separator appears between a `daemon-startup` entry and the entry above it (which belongs to the previous session). No separator is shown above the oldest visible entry.
+A visual separator `──── daemon restart ────` is inserted between daemon lifecycle sessions. The separator appears between a `daemon-startup` entry and the entry above it (which belongs to the previous session). No separator is shown above the oldest visible entry.
 
 The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, the entire `+` line is green and the entire `-` line is red (not just the `+`/`-` prefix character — the field name and value are colored too).
 
@@ -371,7 +370,7 @@ Feature: History list command
     Given a journal with 30 entries
     When `netfyr history` is run
     Then the output shows the 20 most recent entries in reverse chronological order
-    And each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, and CHANGES
+    And each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, and CHANGES
 
   Scenario: Limit entry count
     Given a journal with 30 entries
@@ -536,7 +535,7 @@ Feature: Daemon-startup separators
   Scenario: Separator between daemon sessions
     Given journal entries: seq=5 (policy-apply), seq=4 (daemon-startup), seq=3 (external)
     When `netfyr history` is run
-    Then a "─── daemon restart ───" separator appears between seq=5 and seq=3
+    Then a "──── daemon restart ────" separator appears between seq=5 and seq=3
     And the separator is placed after the daemon-startup entry (between it and the previous session)
 
   Scenario: No separator above oldest visible entry

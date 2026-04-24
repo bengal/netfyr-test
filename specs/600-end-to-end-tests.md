@@ -270,7 +270,7 @@ Verifies `netfyr history` shows recorded entries with proper formatting:
 4. Apply policy B (named `veth-e2e0-b`) setting mtu=1300 on `veth-e2e0`.
 5. Run `netfyr history -n 5`.
 6. Verify the output contains 2 entries in reverse chronological order (most recent first).
-7. Verify each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, and CHANGES columns.
+7. Verify each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, and CHANGES columns (no OUTCOME column).
 8. Verify the CHANGES column for the second apply shows `mtu 1400→1300` (scalar change with old→new values) and the address removal by value.
 9. Verify the TIMESTAMP column uses relative format (entries are recent, so should show durations like "N min ago").
 10. Verify column widths are dynamically sized — the SEQ column should not be wider than the header when values are single-digit.
@@ -425,7 +425,7 @@ Verifies that `netfyr history` shows visual separators between daemon lifecycle 
 6. Wait for daemon socket.
 7. Apply a policy setting mtu=1300 on `veth-e2e0`.
 8. Run `netfyr history -n 10`.
-9. Verify the output contains a `─── daemon restart ───` separator line between the entries from the two daemon sessions.
+9. Verify the output contains a `──── daemon restart ────` separator line between the entries from the two daemon sessions.
 10. Verify the separator appears between the daemon-startup entry and the entry above it.
 11. Verify the TRIGGER column shows `daemon-startup` for the daemon-startup entry.
 
@@ -688,7 +688,7 @@ Feature: End-to-end history list
     And policy B named "veth-e2e0-b" (mtu=1300) was applied
     When `netfyr history -n 5` is run
     Then the output contains 2 entries in reverse chronological order
-    And each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, and CHANGES
+    And each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, and CHANGES (no OUTCOME column)
     And the CHANGES column for the second apply shows "mtu 1400→1300" (old→new notation)
     And the TIMESTAMP column shows relative durations (e.g., "N min ago")
     And column widths are dynamically sized (no excessive padding)
@@ -843,7 +843,7 @@ Feature: End-to-end daemon-startup separator in history
     Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
     And the daemon was started, a policy applied, then restarted
     When `netfyr history -n 10` is run
-    Then the output contains a "─── daemon restart ───" separator line
+    Then the output contains a "──── daemon restart ────" separator line
     And the separator appears between the daemon-startup entry and the previous session's entries
     And the TRIGGER column shows "daemon-startup" for the daemon-startup entry
 

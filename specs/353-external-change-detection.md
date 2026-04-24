@@ -20,9 +20,9 @@ The daemon does not re-reconcile on external changes because that would silently
 External change detection is transparent to the user. When enabled (default in daemon mode), external changes appear in `netfyr history` output:
 
 ```
-SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
-145  2026-04-20 15:10:05   external        eth0       observed       ~mtu
-144  2026-04-20 15:00:00   policy-apply    eth0       applied (1 ok) ~mtu
+SEQ  TIMESTAMP              TRIGGER       ENTITIES  CHANGES
+145  2026-04-20 15:10:05    external      eth0      mtu 1400→1500
+144  2026-04-20 15:00:00    policy-apply  eth0      mtu 1500→1400
 ```
 
 The detail view shows which entities changed:

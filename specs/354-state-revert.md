@@ -33,10 +33,10 @@ netfyr revert 142 --dry-run
 
 ```bash
 $ netfyr history -n 3
-SEQ  TIMESTAMP             TRIGGER         ENTITIES   OUTCOME        CHANGES
-144  2026-04-20 15:30:00   policy-apply    eth0       applied (1 ok) ~mtu
-143  2026-04-20 15:00:00   policy-apply    eth0       applied (1 ok) addr(+1)
-142  2026-04-20 14:30:00   policy-apply    eth0       applied (2 ok) ~mtu, addr(+1)
+SEQ  TIMESTAMP              TRIGGER       ENTITIES  CHANGES
+144  2026-04-20 15:30:00    policy-apply  eth0      mtu 1400→9000
+143  2026-04-20 15:00:00    policy-apply  eth0      +10.0.1.50/24
+142  2026-04-20 14:30:00    policy-apply  eth0      mtu 1500→1400, +10.0.1.50/24
 
 $ netfyr revert 143 --dry-run
 Reverting to state from entry #143 (2026-04-20 15:00:00 UTC)
