@@ -35,6 +35,7 @@ rpm -ql netfyr
 /usr/share/man/man1/netfyr-revert.1.gz
 /usr/share/man/man5/netfyr.yaml.5.gz
 /usr/share/man/man7/netfyr-examples.7.gz
+/usr/share/bash-completion/completions/netfyr
 /usr/share/doc/netfyr/examples/policies/bare-ethernet.yaml
 /etc/netfyr/policies
 /usr/share/licenses/netfyr/LICENSE
@@ -128,6 +129,10 @@ install -Dpm 0644 man/netfyr-examples.7 %{buildroot}%{_mandir}/man7/
 install -d %{buildroot}%{_mandir}/man8
 install -Dpm 0644 man/netfyr-daemon.8 %{buildroot}%{_mandir}/man8/
 
+# Install bash completion (SPEC-380)
+install -d %{buildroot}%{_datadir}/bash-completion/completions
+target/release/netfyr completions bash > %{buildroot}%{_datadir}/bash-completion/completions/netfyr
+
 # Install systemd units
 install -Dpm 0644 dist/netfyr.service %{buildroot}%{_unitdir}/netfyr.service
 install -Dpm 0644 dist/netfyr.socket %{buildroot}%{_unitdir}/netfyr.socket
@@ -168,6 +173,7 @@ target/release/netfyr-daemon --help > /dev/null
 %{_mandir}/man7/netfyr-examples.7*
 %dir %{_sysconfdir}/netfyr
 %dir %{_sysconfdir}/netfyr/policies
+%{_datadir}/bash-completion/completions/netfyr
 %{_docdir}/%{name}/examples/policies/
 
 %files daemon
@@ -233,6 +239,7 @@ WantedBy=sockets.target
 | Man page (section 8) | `/usr/share/man/man8/netfyr-daemon.8.gz` | netfyr-daemon |
 | Man page (section 5) | `/usr/share/man/man5/netfyr.yaml.5.gz` | netfyr |
 | Man page (section 7) | `/usr/share/man/man7/netfyr-examples.7.gz` | netfyr |
+| Bash completion | `/usr/share/bash-completion/completions/netfyr` | netfyr |
 | Example files | `/usr/share/doc/netfyr/examples/` | netfyr |
 | Systemd service | `/usr/lib/systemd/system/netfyr.service` | netfyr-daemon |
 | Systemd socket | `/usr/lib/systemd/system/netfyr.socket` | netfyr-daemon |
@@ -304,6 +311,7 @@ The script must be executable (`chmod +x scripts/build-rpm.sh`).
 
 - SPEC-001 (Workspace setup — crate structure)
 - SPEC-301 (CLI apply — binary entry point)
+- SPEC-380 (Bash completion — `netfyr completions bash` subcommand)
 - SPEC-403 (Daemon — daemon binary and systemd units)
 - SPEC-501 (Man pages — man page generation)
 - SPEC-503 (YAML reference man page — netfyr.yaml(5))
@@ -354,6 +362,12 @@ Feature: RPM packaging for Fedora
     When the user runs "man -w netfyr"
     Then the path points to /usr/share/man/man1/netfyr.1.gz
     And "man netfyr" renders the man page
+
+  Scenario: CLI RPM installs bash completion
+    Given the netfyr RPM is installed
+    When the user runs "rpm -ql netfyr"
+    Then the output includes "/usr/share/bash-completion/completions/netfyr"
+    And the file contains a valid bash completion script for netfyr
 
   Scenario: Daemon RPM installs the daemon binary
     Given the netfyr-daemon RPM is installed
