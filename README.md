@@ -17,7 +17,7 @@ manages dynamic factories (DHCPv4) and re-reconciles when leases change.
                                               System state (query)
 ```
 
-Seven crates, layered by responsibility:
+Eight crates, layered by responsibility:
 
 | Crate | Role |
 |---|---|
@@ -26,7 +26,8 @@ Seven crates, layered by responsibility:
 | `netfyr-reconcile` | Per-field priority merge, conflict detection, diff generation |
 | `netfyr-backend` | Backend trait and rtnetlink implementation (query + apply) |
 | `netfyr-varlink` | Varlink IPC protocol between CLI and daemon |
-| `netfyr-cli` | `netfyr` binary: `apply` and `query` commands |
+| `netfyr-journal` | Journal: append-only NDJSON change log with rotation |
+| `netfyr-cli` | `netfyr` binary: `apply`, `query`, `history`, `revert` commands |
 | `netfyr-daemon` | `netfyr-daemon` binary: Varlink server, DHCPv4 factory manager |
 
 ## Specifications
@@ -63,12 +64,17 @@ details, and dependencies.
 | [202](specs/202-conflict-detection.md) | Conflict Detection | Same-priority same-field different-value detection |
 | [203](specs/203-diff-generation.md) | Diff Generation | Desired vs. actual state diff with Add/Modify/Remove |
 
-### 3xx -- CLI (`netfyr-cli`)
+### 3xx -- CLI and journal (`netfyr-cli`, `netfyr-journal`)
 
 | Spec | Title | Summary |
 |---|---|---|
 | [301](specs/301-cli-apply.md) | CLI Apply | `netfyr apply` with daemon-free and daemon modes |
 | [302](specs/302-cli-query.md) | CLI Query | `netfyr query` with selector filtering and YAML/JSON output |
+| [351](specs/351-journal-infrastructure.md) | Journal Infrastructure | Append-only NDJSON journal with rotation and locking |
+| [352](specs/352-history-cli.md) | History CLI | `netfyr history` with filtering, detail view, and Varlink API |
+| [353](specs/353-external-change-detection.md) | External Change Detection | Detect and record out-of-band route/address changes |
+| [354](specs/354-state-revert.md) | State Revert | `netfyr revert` to restore a previous journal snapshot |
+| [380](specs/380-bash-completion.md) | Bash Completion | Tab completion for all subcommands, flags, and values |
 
 ### 4xx -- Daemon (`netfyr-daemon`, `netfyr-varlink`)
 
