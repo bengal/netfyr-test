@@ -73,6 +73,8 @@ Dry run: 2 changes would be applied.
   + ethernet eth1: mtu 1500, addresses [10.0.1.50/24]
 ```
 
+Skipped operations (from `ApplyReport.skipped`) are not displayed. They represent internal backend decisions (e.g., idempotent no-ops for addresses already present or absent) that are not actionable by the user. Only succeeded (`~`, `+`, `-`) and failed (`x`) operations appear in the output.
+
 ### Exit codes
 - `0`: All operations succeeded (or no changes needed).
 - `1`: Partial failure (some operations succeeded, some failed) or conflicts detected.

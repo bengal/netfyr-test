@@ -38,7 +38,7 @@ The `StateDiff` contains a list of `DiffOperation` entries. Each has an operatio
    - `routes` (add): For each new route, `handle.route().add().output_interface(index).destination_prefix(dst, len).gateway(gw).execute()`
    - `routes` (remove): For each removed route, look up the route and delete it via `handle.route().del(route_message).execute()`
    - `operstate` (up/down): `handle.link().set(index).up().execute()` or `.down()`
-3. Read-only fields (`carrier`, `speed`, `mac`, `driver`) in the diff are skipped with a reason "read-only field".
+3. Read-only fields (`carrier`, `speed`, `mac`, `driver`) in the diff are skipped with a reason "read-only field". This is a defensive check — normally SPEC-203 excludes read-only fields from the diff, so this path should not trigger in practice.
 
 **Remove operation** (deconfigure an interface):
 1. Look up the interface index by name.
@@ -66,8 +66,9 @@ Each operation is attempted independently. If one fails:
 Operations should be idempotent where possible:
 - Adding an address that already exists: skip with reason "already present" (do not fail).
 - Removing an address that does not exist: skip with reason "not present" (do not fail).
+- Removing a route that does not exist: treat as a successful operation — the desired state (route absent) is already achieved. This appears in `ApplyReport.succeeded`, not `skipped`. This commonly occurs when the kernel automatically removes implied routes (e.g., prefix route, local and broadcast host routes) as a side effect of address removal earlier in the same apply operation.
 - Setting MTU to its current value: skip with reason "already at desired value".
-- These skipped operations appear in `ApplyReport.skipped`, not `failed`.
+- Skipped operations appear in `ApplyReport.skipped`, not `failed`.
 
 ### Ordering within a single entity
 
@@ -130,11 +131,14 @@ Feature: Apply ethernet configuration via rtnetlink
     Then the ApplyReport has 1 succeeded operation
     And the default route via "10.0.1.1" no longer exists
 
-  Scenario: Modify operation skips read-only fields
+  Scenario: Modify operation skips read-only fields (defensive)
     Given a StateDiff with a Modify operation on "eth0" that includes field changes for "carrier" and "speed"
     When apply is called
     Then those field changes are in the skipped list with reason "read-only field"
     And the ApplyReport does not report them as failures
+    # Note: this is a defensive check. SPEC-203 requires read-only fields
+    # to be excluded from the diff, so the backend should not normally
+    # receive them.
 
   Scenario: Adding an already-existing address is idempotent
     Given an ethernet interface "eth0" with address "10.0.1.50/24"
@@ -149,6 +153,13 @@ Feature: Apply ethernet configuration via rtnetlink
     When apply is called
     Then the operation is in the skipped list with reason "not present"
     And is_success() returns true (no failures)
+
+  Scenario: Removing a non-existent route counts as success
+    Given an ethernet interface "eth0" with address "10.0.1.50/24" and no routes
+    And a StateDiff with a Modify operation removing route destination="10.0.0.0/24" gateway="10.0.1.1"
+    When apply is called
+    Then the operation is in the succeeded list (not skipped or failed)
+    And is_success() returns true
 
   Scenario: Apply to a non-existent interface reports failure
     Given no interface named "eth99" exists
