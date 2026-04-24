@@ -45,7 +45,7 @@ Dependencies only point backward (lower numbers). No forward references.
 | netfyr-backend | 101-103 | Backend trait, rtnetlink query/apply |
 | netfyr-reconcile | 201-203 | Merge, conflict detection, diff generation |
 | netfyr-journal | 351 | Journal infrastructure |
-| netfyr-cli | 301, 302, 352, 354 | CLI subcommands (apply, query, history, revert) |
+| netfyr-cli | 301, 302, 352, 354, 355 | CLI subcommands (apply, query, history, revert, diagnose) |
 | netfyr-daemon | 353, 401-405 | Daemon, DHCPv4 factory, policy store, varlink |
 | netfyr-varlink | 404 | Varlink protocol definitions |
 

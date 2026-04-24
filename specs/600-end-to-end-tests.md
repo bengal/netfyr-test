@@ -445,6 +445,55 @@ Verifies that debug-level messages appear for the main event flow:
    - `diff computed` (reconciliation)
 8. Verify all 5 patterns are present.
 
+#### 29. Diagnose detects configuration drift (`600-e2e-diagnose-drift.sh`)
+Verifies that `netfyr diagnose` detects when external changes have drifted the system from policy:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Run `ip link set veth-e2e0 mtu 1500` externally.
+6. Sleep 1s (debounce).
+7. Run `netfyr diagnose -s name=veth-e2e0`.
+8. Verify the output shows "configuration drift" with severity "warning".
+9. Verify the output mentions mtu=1400 (policy) vs mtu=1500 (system).
+10. Verify the output suggests `netfyr apply` to re-converge.
+11. Verify the exit code is 1 (warning).
+
+#### 30. Diagnose reports healthy when no drift (`600-e2e-diagnose-healthy.sh`)
+Verifies that `netfyr diagnose` reports healthy when system matches policy:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Run `netfyr diagnose -s name=veth-e2e0`.
+6. Verify the output shows "healthy".
+7. Verify the exit code is 0.
+
+#### 31. Diagnose detects carrier loss (`600-e2e-diagnose-carrier.sh`)
+Verifies that `netfyr diagnose` detects carrier loss:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Bring down the peer end: `ip link set veth-e2e1 down`.
+6. Sleep 1s (debounce).
+7. Run `netfyr diagnose -s name=veth-e2e0`.
+8. Verify the output shows "carrier loss" with severity "critical".
+9. Verify the exit code is 2 (critical).
+
+#### 32. Diagnose JSON output (`600-e2e-diagnose-json.sh`)
+Verifies that `netfyr diagnose -o json` produces valid structured output:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Run `ip link set veth-e2e0 mtu 1500` externally.
+6. Sleep 1s.
+7. Run `netfyr diagnose -o json`.
+8. Pipe through `jq` to validate it is a JSON array.
+9. Verify the array contains an element with `"pattern": "configuration_drift"`.
+10. Verify the element has `entity`, `severity`, `summary`, `details`, `suggested_actions`, and `related_entries` fields.
+
 #### 27. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
@@ -465,6 +514,7 @@ Verifies that interfaces not targeted by any policy are left alone:
 - SPEC-302 (CLI query — used for verification)
 - SPEC-351 (journal infrastructure — needed for journal and revert tests)
 - SPEC-352 (history CLI — needed for history tests)
+- SPEC-355 (diagnose CLI — needed for diagnose tests)
 - SPEC-353 (external change detection — needed for external change test)
 - SPEC-354 (state revert — needed for revert tests)
 - SPEC-401 (DHCP factory — needed for DHCP tests)
@@ -808,6 +858,44 @@ Feature: End-to-end debug logging
     And the daemon's stderr contains "debounce timer fired"
     And the daemon's stderr contains "recording external changes"
     And the daemon's stderr contains "diff computed"
+
+Feature: End-to-end diagnose drift
+  Scenario: Diagnose detects configuration drift from external changes
+    Given a namespace with a veth pair, the daemon running, and NETFYR_JOURNAL_DIR set
+    And a policy setting mtu=1400 on veth-e2e0 has been applied
+    When `ip link set veth-e2e0 mtu 1500` is run externally
+    And 1 second passes
+    And `netfyr diagnose -s name=veth-e2e0` is run
+    Then the output shows "configuration drift" with severity "warning"
+    And the output mentions mtu=1400 (policy) vs mtu=1500 (system)
+    And the output suggests `netfyr apply`
+    And the exit code is 1
+
+  Scenario: Diagnose reports healthy when system matches policy
+    Given a namespace with a veth pair, the daemon running, and NETFYR_JOURNAL_DIR set
+    And a policy setting mtu=1400 on veth-e2e0 has been applied (no external changes)
+    When `netfyr diagnose -s name=veth-e2e0` is run
+    Then the output shows "healthy"
+    And the exit code is 0
+
+Feature: End-to-end diagnose carrier loss
+  Scenario: Diagnose detects carrier loss via peer link down
+    Given a namespace with a veth pair, the daemon running, and NETFYR_JOURNAL_DIR set
+    And a policy setting mtu=1400 on veth-e2e0 has been applied
+    When the peer `ip link set veth-e2e1 down` is run
+    And 1 second passes
+    And `netfyr diagnose -s name=veth-e2e0` is run
+    Then the output shows "carrier loss" with severity "critical"
+    And the exit code is 2
+
+Feature: End-to-end diagnose JSON output
+  Scenario: Diagnose -o json produces valid structured output
+    Given a namespace with a veth pair, the daemon running, and NETFYR_JOURNAL_DIR set
+    And a policy setting mtu=1400 has been applied and mtu externally changed to 1500
+    When `netfyr diagnose -o json` is run
+    Then the output is a valid JSON array
+    And an element has "pattern": "configuration_drift"
+    And the element has entity, severity, summary, details, suggested_actions, and related_entries fields
 
 Feature: End-to-end unmanaged interfaces
   Scenario: Interfaces without policies are not modified
