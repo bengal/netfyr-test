@@ -121,6 +121,7 @@ Feature: Bash completion generation
     And the output contains "--since"
     And the output contains "--show"
     And the output contains "--count"
+    And the output contains "--absolute-timestamps"
 
   Scenario: Invalid shell argument shows error
     When `netfyr completions invalid_shell` is run

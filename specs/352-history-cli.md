@@ -37,6 +37,9 @@ netfyr history --show -1
 # Show the third-to-last entry
 netfyr history --show -3
 
+# Show full timestamps instead of relative
+netfyr history --absolute-timestamps
+
 # JSON output (for piping to jq)
 netfyr history -o json
 
@@ -49,17 +52,31 @@ netfyr history -s name=eth0 --since 7d --trigger apply -o json
 #### Text list (default)
 
 ```
-SEQ  TIMESTAMP             TRIGGER         ENTITIES       OUTCOME          CHANGES
-142  2026-04-20 14:30:00   policy-apply    eth0           applied          ~mtu
-141  2026-04-20 14:15:32   dhcp-lease      eth0           applied          addr(+1)
-140  2026-04-20 14:10:00   external        eth1           observed         ~mtu
-139  2026-04-20 14:00:00   daemon-startup  eth0, eth1     applied          +2 entities
-138  2026-04-20 13:45:00   policy-apply    eth0           applied (1 fail) ~mtu, addr(+1)
+SEQ TIMESTAMP       TRIGGER              ENTITIES       OUTCOME          CHANGES
+142 30 min ago      apply (eth0-static)  eth0           applied          mtu 1500→9000
+141 45 min ago      dhcp-acquire         eth0           applied          +10.0.1.50/24
+140 50 min ago      external             eth1           observed         mtu 1400→1500
+139 1h ago          daemon-startup       +eth0, +eth1   applied          +eth0, +eth1
+138 1h ago          apply (eth0-st…, +1) eth0           applied (1 fail) mtu 1400→9000, +10.0.1.50/24
+─── daemon restart ───
+137 yesterday 12:30 external             eth0, sys:dns  observed         +192.168.1.100/24, +ns 8.8.8.8
+136 yesterday 12:28 external             eth0           observed         mtu 1400→1500, +10.0.1.51/24
+135 yesterday 12:27 external             eth0           observed         +10.0.1.50/24, +3 routes
+134 yesterday 12:25 external             eth0           observed         -10.0.1.99/24
+133 yesterday 12:22 external             eth0           observed         +10.0.1.51/24 (+2 addrs)
+132 yesterday 12:20 external             eth0           observed         +10.0.1.50/24
+131 yesterday 12:15 daemon-startup       eth0           applied          -10.0.1.99/24, -3 routes
 ```
 
-The `OUTCOME` column in list view shows only the outcome kind (`applied`, `observed`). A failure count is appended only when failures occurred: `applied (N fail)`. Success and skip counts are omitted — they add noise in the common case and the detail view (`--show`) has the full breakdown. The column has a fixed width of 17 characters, enough for `applied (N fail)` with reasonable entity counts. If the text exceeds the column width (e.g., very large failure counts), it is truncated with `…`.
+**Relative timestamps**: entries from today show relative durations (`2 min ago`, `1h ago`), yesterday's entries show `yesterday HH:MM`, and older entries show the full date (`2026-04-18 14:30`).
 
-The CHANGES column is placed last so it can use all remaining terminal width. When the line would exceed the terminal width (or 120 characters if stdout is not a TTY), the CHANGES value is truncated with `...`. Full details are available via `--show <seq>`.
+**Daemon-startup separators**: a `─── daemon restart ───` line is inserted after each entry whose trigger is `daemon-startup`, visually separating daemon lifecycle sessions. The separator appears between the daemon-startup row and the row above it (which belongs to the previous session).
+
+**Dynamic column widths**: each column width is computed as `max(header_width, widest_value)`, capped at a per-column maximum. Values exceeding the cap are truncated with `…`. The CHANGES column (rightmost) has no maximum and uses all remaining terminal width. See the Text formatting section for max width values.
+
+The `OUTCOME` column in list view shows only the outcome kind (`applied`, `observed`). A failure count is appended only when failures occurred: `applied (N fail)`. Success and skip counts are omitted — they add noise in the common case and the detail view (`--show`) has the full breakdown.
+
+The CHANGES column is placed last so it can use all remaining terminal width. When the line would exceed the terminal width (or 120 characters if stdout is not a TTY), the CHANGES value is truncated with `…`. Full details are available via `--show <seq>`.
 
 #### Text detail (`--show <seq>`)
 
@@ -146,6 +163,10 @@ struct HistoryArgs {
     /// Output format: "text" (default), "json".
     #[arg(long, short = 'o', default_value = "text")]
     output: OutputFormat,
+
+    /// Show full timestamps (YYYY-MM-DD HH:MM:SS) instead of relative/abbreviated.
+    #[arg(long)]
+    absolute_timestamps: bool,
 }
 ```
 
@@ -180,18 +201,94 @@ Filters combine with AND logic.
 
 ### Text formatting
 
-The list format uses fixed-width columns for all columns except CHANGES, which is placed last and uses all remaining terminal width. The column order is: SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, CHANGES.
+#### Dynamic column widths
 
-The `ENTITIES` column has a fixed width of 25 characters — enough for one maximum-length Linux interface name (15 chars) plus the `+N more` suffix. It shows a comma-separated list of entity names from the diff operations. If the text would exceed the column width, it is truncated with `+N more` (e.g., `enp7s0, +2 more`).
+The list format uses dynamically computed column widths. For each column, the width is `max(header_width, widest_value_in_column)`, capped at a per-column maximum. Values exceeding the cap are truncated with `…` (Unicode ellipsis). The CHANGES column is always last and has no maximum — it uses all remaining terminal width.
 
-The `CHANGES` column shows a compact summary using this notation:
-- **Scalar fields** (mtu, carrier, state, driver, mac, name): `+field` (set), `~field` (changed), `-field` (removed).
-- **List fields** (addresses, routes): `addr(+2)` (2 added), `addr(-1)` (1 removed), `addr(+1,-1)` (1 added, 1 removed), `routes(+3)` (3 added). Zero counts are omitted. List fields only have `+N` and `-N` counts, never `~`, because individual list elements are either present or absent.
-- **Entity-level operations**: `+entity` (new entity), `-entity` (entity removed).
+Column order and maximum widths:
 
-When color is enabled (see SPEC-301 for the global `--color` flag), the entire `+` line is green, the entire `-` line is red, and `~` lines are yellow. Colors reinforce but never replace the textual indicators — the output is unambiguous without color.
+| Column    | Max width | Notes |
+|-----------|-----------|-------|
+| SEQ       | 5         | |
+| TIMESTAMP | 20        | Enough for `yesterday HH:MM` and relative durations |
+| TRIGGER   | 14        | Enough for `daemon-startup`; `apply (…)` and `revert (N)` truncate at cap |
+| ENTITIES  | 24        | Enough for one max-length interface name (15) + lifecycle prefix + `(+N more)` |
+| OUTCOME   | 17        | Enough for `applied (N fail)` |
+| CHANGES   | unlimited | Uses all remaining terminal width |
 
-The CHANGES value is truncated with `...` when it would exceed the terminal width (or 120 characters if stdout is not a TTY).
+When the CHANGES value would exceed the terminal width (or 120 characters if stdout is not a TTY), it is truncated with `…`.
+
+#### TRIGGER column
+
+The TRIGGER column shows a human-readable label for what caused the change, with context where useful:
+
+| Trigger variant | Display format | Examples |
+|---|---|---|
+| `PolicyApply` | `apply (<policy>)` | `apply (eth0-static)`, `apply (eth0-static, +2)` |
+| `DhcpEvent` | `dhcp-acquire`, `dhcp-renew`, `dhcp-expire` | `dhcp-acquire` |
+| `ExternalChange` | `external` | `external` |
+| `DaemonStartup` | `daemon-startup` | `daemon-startup` |
+| `Revert` | `revert (<seq>)` | `revert (42)` |
+
+For `apply`, the parenthesized value shows the first policy name from `active_policies`. If multiple policies were applied, append `+N`: `apply (eth0-static, +2)`. The policy name is always used — never the source path or `"daemon"`, since the user cares about what was applied, not how it was submitted.
+
+For DHCP events, the `event_kind` field (`lease_acquired`, `lease_renewed`, `lease_expired`) maps directly to `dhcp-acquire`, `dhcp-renew`, `dhcp-expire`.
+
+For `revert`, the parenthesized value is the target sequence number being reverted to.
+
+When the trigger text exceeds the column's max width (14 chars), it is truncated with `…`: `apply (eth0-s…`.
+
+#### Timestamps
+
+By default, timestamps use relative or abbreviated formats depending on age:
+- **Today**: relative duration — `2 min ago`, `30 min ago`, `1h ago`, `5h ago`.
+- **Yesterday**: `yesterday HH:MM` (24-hour format).
+- **Older**: full date — `2026-04-18 14:30`.
+
+When `--absolute-timestamps` is passed, all list-view timestamps use the full format `YYYY-MM-DD HH:MM:SS` instead.
+
+The `--show` detail view always uses the full ISO 8601 timestamp (`2026-04-20 14:30:00 UTC`) regardless of the flag.
+
+#### ENTITIES column
+
+The ENTITIES column shows which entities were affected by the change. Entity names are prefixed with lifecycle indicators:
+- `+entity` — entity was created (Add operation in the diff).
+- `-entity` — entity was removed (Remove operation in the diff).
+- `entity` (no prefix) — entity was modified.
+
+System-wide resources (not network interfaces) use the `sys:` prefix to avoid ambiguity with interface names: `sys:dns`, `sys:hostname`, `sys:ntp`. Interface names are shown bare.
+
+When the entity list exceeds the column width, it is capped with a count suffix:
+- **1–3 entities**: show all.
+- **4–6 entities**: show the first 2, then `(+N more)`.
+- **7+ entities**: show counts by operation — `+4, ~2, -1 entities`.
+
+When capping, prioritize entities with lifecycle events (created/removed) over modifications, and entities with the largest change sets.
+
+#### CHANGES column
+
+The CHANGES column shows a compact summary of what changed, using actual values instead of opaque counts.
+
+**Scalar field changes** use `old→new` notation: `mtu 1500→9000`, `state up→down`. New fields show just the value prefixed with `+`: `+mtu: 1500`. Removed fields show `-field`.
+
+**Address changes** show actual addresses inline, with `+`/`-` prefixes:
+- 1–2 addresses changed: show all by value — `+192.168.1.100/24`, `-10.0.0.42/24`.
+- 3–8 addresses changed: show the first 2 by value, count the rest — `+192.168.1.100/24 +10.0.0.50/24 (+3 addrs), -10.0.0.42/24 (-2 addrs)`.
+- 9+ addresses changed: show only counts — `+10 addrs, -10 addrs`.
+
+When selecting which addresses to show by value, prioritize non-link-local addresses over `fe80::`/`169.254.` addresses.
+
+**Route changes** always show the default route by value when it changes: `+dflt via 10.0.0.1`, `-dflt via 192.168.1.1`. Non-default routes use counts: `+3 routes`, `-1 route`. The default route is always shown regardless of the address cap.
+
+**DNS changes** show nameserver values with the `ns` shorthand: `+ns 8.8.8.8`, `-ns 10.0.0.1`. Search domain changes use scalar notation: `search example.com→corp.local`.
+
+**Entity-level operations**: `+entity` (new entity created), `-entity` (entity removed).
+
+When color is enabled (see SPEC-301 for the global `--color` flag), added values are green, removed values are red, and changed scalars are yellow. Colors reinforce but never replace the textual indicators — the output is unambiguous without color.
+
+#### Daemon-startup separators
+
+A visual separator `─── daemon restart ───` is inserted between daemon lifecycle sessions. The separator appears between a `daemon-startup` entry and the entry above it (which belongs to the previous session). No separator is shown above the oldest visible entry.
 
 The detail format (`--show`) renders the full `JournalEntry` in a human-readable layout matching the format shown in the User Interaction section. The diff section uses unified-diff style as defined in SPEC-203: scalar fields show `-old` / `+new` line pairs; list fields show a header followed by per-element `+`/`-` lines (unchanged elements omitted). When color is enabled, the entire `+` line is green and the entire `-` line is red (not just the `+`/`-` prefix character — the field name and value are colored too).
 
@@ -300,6 +397,152 @@ Feature: History list command
     Given multiple journal entries
     When `netfyr history -s name=eth0 --trigger apply --since 1h` is run
     Then only entries matching all three filters are shown
+
+Feature: Dynamic column widths
+  Scenario: Column widths adapt to content
+    Given a journal with entries where SEQ values are 1-9 (single digit)
+    And entity names are all "eth0" (4 chars)
+    When `netfyr history` is run
+    Then the SEQ column is 3 characters wide (matching header width)
+    And the ENTITIES column is 8 characters wide (matching header width)
+    And columns are not padded to their maximum width
+
+  Scenario: Column widths respect maximum caps
+    Given a journal entry with 10 entities whose names total over 30 characters
+    When `netfyr history` is run
+    Then the ENTITIES column does not exceed 24 characters
+    And the overflowing entity list is truncated with "…"
+
+  Scenario: CHANGES column uses remaining terminal width
+    Given a journal entry with a long CHANGES value
+    When `netfyr history` is run on a 120-column terminal
+    Then the CHANGES column extends to fill the remaining terminal width
+    And values exceeding the available width are truncated with "…"
+
+Feature: Relative timestamps
+  Scenario: Entries from today show relative durations
+    Given a journal entry from 5 minutes ago and one from 2 hours ago
+    When `netfyr history` is run
+    Then the recent entry shows "5 min ago"
+    And the older entry shows "2h ago"
+
+  Scenario: Entries from yesterday show abbreviated date
+    Given a journal entry from yesterday at 15:26
+    When `netfyr history` is run
+    Then the entry shows "yesterday 15:26"
+
+  Scenario: Older entries show full date
+    Given a journal entry from 3 days ago at 14:30
+    When `netfyr history` is run
+    Then the entry shows the date in "YYYY-MM-DD HH:MM" format
+
+  Scenario: Detail view always shows full timestamp
+    Given a journal entry from 5 minutes ago
+    When `netfyr history --show <seq>` is run
+    Then the timestamp is shown in full ISO 8601 format with UTC suffix
+
+  Scenario: Absolute timestamps flag overrides relative format
+    Given a journal entry from 5 minutes ago
+    When `netfyr history --absolute-timestamps` is run
+    Then the TIMESTAMP column shows "YYYY-MM-DD HH:MM:SS" (full format, not "5 min ago")
+
+Feature: CHANGES column inline values
+  Scenario: Scalar change shows old and new values
+    Given a journal entry where mtu changed from 1500 to 9000 on eth0
+    When `netfyr history` is run
+    Then the CHANGES column shows "mtu 1500→9000"
+
+  Scenario: Single address addition shows actual value
+    Given a journal entry where address 192.168.1.100/24 was added
+    When `netfyr history` is run
+    Then the CHANGES column shows "+192.168.1.100/24"
+
+  Scenario: Two address changes show both values
+    Given a journal entry where 10.0.0.50/24 was added and 10.0.0.42/24 was removed
+    When `netfyr history` is run
+    Then the CHANGES column shows "+10.0.0.50/24, -10.0.0.42/24"
+
+  Scenario: Many address changes cap at two shown values
+    Given a journal entry where 5 addresses were added and 3 removed
+    When `netfyr history` is run
+    Then the CHANGES column shows the first 2 added addresses by value
+    And shows "(+3 addrs)" for the remaining additions
+    And shows the first removed address by value
+    And shows "(-2 addrs)" for the remaining removals
+
+  Scenario: Very many address changes show only counts
+    Given a journal entry where 10 addresses were added and 10 removed
+    When `netfyr history` is run
+    Then the CHANGES column shows "+10 addrs, -10 addrs"
+
+  Scenario: Default route change always shown by value
+    Given a journal entry where the default route changed and 5 other routes were added
+    When `netfyr history` is run
+    Then the CHANGES column shows "+dflt via 10.0.0.1" (the default route by value)
+    And shows "+5 routes" for the non-default routes
+
+  Scenario: Non-default route changes show counts only
+    Given a journal entry where 3 non-default routes were added
+    When `netfyr history` is run
+    Then the CHANGES column shows "+3 routes"
+
+  Scenario: Address priority prefers non-link-local
+    Given a journal entry where fe80::1/64 and 192.168.1.100/24 were both added
+    When `netfyr history` is run
+    Then the CHANGES column shows 192.168.1.100/24 (non-link-local is shown first)
+
+  Scenario: DNS nameserver changes show ns shorthand
+    Given a journal entry where nameserver 8.8.8.8 was added on sys:dns
+    When `netfyr history` is run
+    Then the CHANGES column shows "+ns 8.8.8.8"
+
+  Scenario: DNS search domain change shows scalar notation
+    Given a journal entry where the search domain changed from example.com to corp.local
+    When `netfyr history` is run
+    Then the CHANGES column shows "search example.com→corp.local"
+
+Feature: ENTITIES column formatting
+  Scenario: Created entity shows + prefix
+    Given a journal entry with a diff Add operation for ethernet eth0
+    When `netfyr history` is run
+    Then the ENTITIES column shows "+eth0"
+
+  Scenario: Removed entity shows - prefix
+    Given a journal entry with a diff Remove operation for vlan bond0.200
+    When `netfyr history` is run
+    Then the ENTITIES column shows "-bond0.200"
+
+  Scenario: Modified entity shows no prefix
+    Given a journal entry with a diff Modify operation for ethernet eth0
+    When `netfyr history` is run
+    Then the ENTITIES column shows "eth0" (no prefix)
+
+  Scenario: System entity uses sys: prefix
+    Given a journal entry affecting dns/global
+    When `netfyr history` is run
+    Then the ENTITIES column shows "sys:dns"
+
+  Scenario: Mixed interface and system entities
+    Given a journal entry affecting ethernet eth0 and dns/global
+    When `netfyr history` is run
+    Then the ENTITIES column shows "eth0, sys:dns"
+
+  Scenario: Many entities are capped
+    Given a journal entry affecting 6 entities
+    When `netfyr history` is run
+    Then the ENTITIES column shows the first 2 entities and "(+4 more)"
+
+Feature: Daemon-startup separators
+  Scenario: Separator between daemon sessions
+    Given journal entries: seq=5 (policy-apply), seq=4 (daemon-startup), seq=3 (external)
+    When `netfyr history` is run
+    Then a "─── daemon restart ───" separator appears between seq=5 and seq=3
+    And the separator is placed after the daemon-startup entry (between it and the previous session)
+
+  Scenario: No separator above oldest visible entry
+    Given a journal with 3 entries where seq=1 is daemon-startup
+    When `netfyr history` is run
+    Then no separator appears below seq=1 (nothing older to separate from)
 
 Feature: History detail command
   Scenario: Show full detail for an entry

@@ -113,6 +113,8 @@ Simulates a system with a DHCP-configured interface alongside a statically confi
 6. Verify `veth-static0` has mtu=1400 and address `10.99.0.1/24`.
 7. Verify `veth-dhcp0` has an address in the `10.99.1.0/24` range.
 8. Verify neither interface's configuration interferes with the other.
+9. Set `NETFYR_JOURNAL_DIR` to a temp directory (or ensure it was set before step 4).
+10. Run `netfyr history -n 5` and verify that a DHCP lease entry shows `dhcp-acquire` in the TRIGGER column.
 
 #### 3. Replace-all semantics (`600-e2e-replace-all.sh`)
 Simulates a user changing their policy set:
@@ -261,15 +263,21 @@ Verifies sequence numbers are monotonic across multiple applies:
 7. Verify seq=1 timestamp is earlier than seq=2 timestamp.
 
 #### 18. History lists journal entries (`600-e2e-history-list.sh`)
-Verifies `netfyr history` shows recorded entries:
+Verifies `netfyr history` shows recorded entries with proper formatting:
 1. Create veth pair `veth-e2e0`/`veth-e2e1`.
 2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
-3. Apply policy A setting mtu=1400 on `veth-e2e0`.
-4. Apply policy B setting mtu=1300 on `veth-e2e0`.
+3. Apply policy A (named `veth-e2e0-a`) setting mtu=1400 and address `10.99.0.1/24` on `veth-e2e0`.
+4. Apply policy B (named `veth-e2e0-b`) setting mtu=1300 on `veth-e2e0`.
 5. Run `netfyr history -n 5`.
-6. Verify the output contains 2 entries.
-7. Verify the entries are in reverse chronological order (most recent first).
-8. Verify each row shows SEQ, TIMESTAMP, TRIGGER, and OUTCOME columns.
+6. Verify the output contains 2 entries in reverse chronological order (most recent first).
+7. Verify each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, and CHANGES columns.
+8. Verify the CHANGES column for the second apply shows `mtu 1400→1300` (scalar change with old→new values) and the address removal by value.
+9. Verify the TIMESTAMP column uses relative format (entries are recent, so should show durations like "N min ago").
+10. Verify column widths are dynamically sized — the SEQ column should not be wider than the header when values are single-digit.
+11. Verify the TRIGGER column shows `apply (veth-e2e0-b)` for the most recent entry (policy name in parentheses).
+12. Verify the ENTITIES column shows `veth-e2e0` without a `+` or `-` prefix (entity was modified, not created or removed).
+13. Run `netfyr history --absolute-timestamps -n 5`.
+14. Verify the TIMESTAMP column shows full `YYYY-MM-DD HH:MM:SS` format instead of relative durations.
 
 #### 19. History show detail (`600-e2e-history-show.sh`)
 Verifies `netfyr history --show` displays full entry detail:
@@ -327,6 +335,7 @@ Verifies `netfyr revert` restores a previous state:
 6. Run `netfyr revert 1`.
 7. Verify mtu is now 1400.
 8. Verify the revert created a new journal entry with trigger type `"revert"`.
+9. Run `netfyr history -n 1` and verify the TRIGGER column shows `revert (1)` (target seq in parentheses).
 
 #### 23. Revert dry-run (`600-e2e-revert-dry-run.sh`)
 Verifies `netfyr revert --dry-run` previews without applying:
@@ -356,6 +365,7 @@ Verifies revert handles address restoration:
 6. Run `netfyr revert 1`.
 7. Verify `veth-e2e0` has addresses `10.99.0.1/24` and `10.99.0.2/24`.
 8. Verify `veth-e2e0` does not have `10.99.0.3/24`.
+9. Run `netfyr history -n 1` and verify the CHANGES column shows the restored addresses by value (e.g., `+10.99.0.1/24`, `+10.99.0.2/24`) and the removal by value (`-10.99.0.3/24`).
 
 #### 26. External change detection (`600-e2e-external-change.sh`)
 Verifies the daemon detects and journals external network changes without reverting them:
@@ -399,6 +409,25 @@ Verifies the daemon detects and journals external network changes without revert
 38. Verify a journal entry with trigger `"external_change"` is recorded.
 39. Verify the entry's diff shows the route removal and the route addition.
 40. Verify the daemon did not re-apply the original policy state at any point during the test.
+41. **History text output shows inline values**: run `netfyr history -n 3` (text format).
+42. Verify the CHANGES column shows `mtu 1400→1500` (not `~mtu`) for the MTU change entry.
+43. Verify the CHANGES column shows actual addresses for address change entries (e.g., `+10.99.0.1/24`).
+44. Verify the TRIGGER column shows `external` for the external change entries.
+45. Verify the ENTITIES column shows `veth-e2e0` without a `+` or `-` prefix (external changes modify existing entities).
+
+#### 26b. Daemon-startup separator in history (`600-e2e-history-separator.sh`)
+Verifies that `netfyr history` shows visual separators between daemon lifecycle sessions:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_JOURNAL_DIR` to a temp directory.
+3. Start the daemon.
+4. Apply a policy setting mtu=1400 on `veth-e2e0`.
+5. Kill the daemon and restart it with the same policy directory.
+6. Wait for daemon socket.
+7. Apply a policy setting mtu=1300 on `veth-e2e0`.
+8. Run `netfyr history -n 10`.
+9. Verify the output contains a `─── daemon restart ───` separator line between the entries from the two daemon sessions.
+10. Verify the separator appears between the daemon-startup entry and the entry above it.
+11. Verify the TRIGGER column shows `daemon-startup` for the daemon-startup entry.
 
 #### 28. Debug logging covers key decision points (`600-e2e-debug-logging.sh`)
 Verifies that debug-level messages appear for the main event flow:
@@ -478,6 +507,7 @@ Feature: End-to-end DHCP and static coexistence
     Then veth-static0 has mtu=1400 and address 10.99.0.1/24
     And veth-dhcp0 has an address in the 10.99.1.0/24 range
     And neither interface's configuration is affected by the other
+    And `netfyr history` shows a DHCP lease entry with TRIGGER "dhcp-acquire"
 
 Feature: End-to-end replace-all semantics
   Scenario: Applying a new policy set removes the old one
@@ -602,12 +632,24 @@ Feature: End-to-end journal sequence numbers
     And seq=1 has an earlier timestamp than seq=2
 
 Feature: End-to-end history list
-  Scenario: History shows recorded entries in reverse order
+  Scenario: History shows recorded entries with inline values and dynamic widths
     Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
-    And two policies have been applied
+    And policy A named "veth-e2e0-a" (mtu=1400, address 10.99.0.1/24) was applied
+    And policy B named "veth-e2e0-b" (mtu=1300) was applied
     When `netfyr history -n 5` is run
     Then the output contains 2 entries in reverse chronological order
-    And each row shows SEQ, TIMESTAMP, TRIGGER, and OUTCOME
+    And each row shows SEQ, TIMESTAMP, TRIGGER, ENTITIES, OUTCOME, and CHANGES
+    And the CHANGES column for the second apply shows "mtu 1400→1300" (old→new notation)
+    And the TIMESTAMP column shows relative durations (e.g., "N min ago")
+    And column widths are dynamically sized (no excessive padding)
+    And the TRIGGER column shows "apply (veth-e2e0-b)" for the most recent entry
+    And the ENTITIES column shows "veth-e2e0" without lifecycle prefix (modified, not created)
+
+  Scenario: Absolute timestamps override relative format
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And a policy has been applied
+    When `netfyr history --absolute-timestamps -n 5` is run
+    Then the TIMESTAMP column shows full "YYYY-MM-DD HH:MM:SS" format
 
 Feature: End-to-end history show
   Scenario: History --show displays full entry detail
@@ -645,6 +687,7 @@ Feature: End-to-end revert
     When `netfyr revert 1` is run
     Then veth-e2e0 has mtu=1400
     And a new journal entry with trigger "revert" exists
+    And `netfyr history -n 1` shows TRIGGER "revert (1)"
 
 Feature: End-to-end revert dry-run
   Scenario: Revert --dry-run previews without applying
@@ -669,6 +712,7 @@ Feature: End-to-end revert with addresses
     When `netfyr revert 1` is run
     Then veth-e2e0 has addresses 10.99.0.1/24 and 10.99.0.2/24
     And veth-e2e0 does not have address 10.99.0.3/24
+    And `netfyr history -n 1` CHANGES shows addresses by value (e.g., "+10.99.0.1/24", "-10.99.0.3/24")
 
 Feature: End-to-end external change detection
   Scenario: Daemon detects external MTU change
@@ -735,6 +779,23 @@ Feature: End-to-end external change detection
     Given a policy setting mtu=1400 was applied via the daemon
     When mtu, addresses, and routes are changed externally across multiple steps
     Then the daemon records each change but never re-applies the original state
+
+  Scenario: History text output shows inline values for external changes
+    Given external changes have been recorded (mtu 1400→1500, address additions)
+    When `netfyr history -n 3` is run (text format)
+    Then the CHANGES column shows "mtu 1400→1500" (not "~mtu")
+    And the CHANGES column shows actual address values (e.g., "+10.99.0.1/24")
+    And the TRIGGER column shows "external"
+    And the ENTITIES column shows "veth-e2e0" without lifecycle prefix
+
+Feature: End-to-end daemon-startup separator in history
+  Scenario: History shows separator between daemon sessions
+    Given a namespace with a veth pair and NETFYR_JOURNAL_DIR set
+    And the daemon was started, a policy applied, then restarted
+    When `netfyr history -n 10` is run
+    Then the output contains a "─── daemon restart ───" separator line
+    And the separator appears between the daemon-startup entry and the previous session's entries
+    And the TRIGGER column shows "daemon-startup" for the daemon-startup entry
 
 Feature: End-to-end debug logging
   Scenario: Debug messages appear for external change flow
