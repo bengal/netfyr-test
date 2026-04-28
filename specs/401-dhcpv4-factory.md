@@ -174,6 +174,11 @@ fn lease_to_state(lease: &DhcpLease, interface: &str) -> State {
     );
 
     // Default gateway (option 3)
+    // The route map MUST include `metric` to match the format produced by the
+    // query layer (build_route_value in ethernet.rs). Without it, the route
+    // maps compare unequal, causing the diff engine to generate simultaneous
+    // add+remove for the same destination -- the add is skipped (EEXIST) and
+    // the remove succeeds, deleting the default route.
     if let Some(gateway) = &lease.gateway {
         fields.insert(
             FieldName::from("routes"),
@@ -181,6 +186,7 @@ fn lease_to_state(lease: &DhcpLease, interface: &str) -> State {
                 FieldValue::Map(btreemap! {
                     "destination".into() => FieldValue::String("0.0.0.0/0".into()),
                     "gateway".into() => FieldValue::String(gateway.to_string()),
+                    "metric".into() => FieldValue::U64(0),
                 }),
             ]),
         );
@@ -291,7 +297,7 @@ Feature: DHCPv4 factory
     Given a DHCP lease with IP 10.0.1.50, mask 255.255.255.0, gateway 10.0.1.1, DNS 10.0.1.2
     When lease_to_state is called
     Then the State has addresses=["10.0.1.50/24"]
-    And the State has routes with destination="0.0.0.0/0" gateway="10.0.1.1"
+    And the State has routes with destination="0.0.0.0/0" gateway="10.0.1.1" metric=0
     And the State has dns_servers=["10.0.1.2"]
 
   Scenario: Factory sends LeaseRenewed on renewal
