@@ -494,6 +494,23 @@ Verifies that `netfyr diagnose -o json` produces valid structured output:
 9. Verify the array contains an element with `"pattern": "configuration_drift"`.
 10. Verify the element has `entity`, `severity`, `summary`, `details`, `suggested_actions`, and `related_entries` fields.
 
+#### 33. DHCP lease expiry and re-acquisition (`600-e2e-dhcp-lease-expiry.sh`)
+Verifies that the daemon removes the DHCP-assigned address when the lease expires and re-acquires a lease when the DHCP server becomes available again:
+1. Create veth pair `veth-dhcp0`/`veth-dhcp1`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-dhcp1` serving `10.99.1.100-10.99.1.200` with a 120-second lease (the minimum dnsmasq allows).
+4. Start the daemon with `NETFYR_JOURNAL_DIR` set to a temp directory.
+5. Write a DHCP policy for `veth-dhcp0` and run `netfyr apply`.
+6. Wait for the DHCP address to appear on `veth-dhcp0` (poll up to 10 s).
+7. Kill the dnsmasq process so that T1 renewal and T2 rebind requests fail silently.
+8. Wait for the address to disappear from `veth-dhcp0` (poll up to 150 s — the 120 s lease plus margin for event processing and reconciliation).
+9. Verify `veth-dhcp0` has no IPv4 address in the `10.99.1.` range.
+10. Restart dnsmasq on `veth-dhcp1` with the same DHCP range and lease time.
+11. Wait for a DHCP address to reappear on `veth-dhcp0` (poll up to 30 s — the client restarts discovery from scratch after expiry, so initial backoff is short).
+12. Verify `veth-dhcp0` has an address in the `10.99.1.` range.
+
+Note: this test takes approximately 2–3 minutes because the minimum dnsmasq lease time is 120 seconds. The polling helper `wait_for_no_address IFACE PREFIX TIMEOUT_SECONDS` (analogous to the existing `wait_for_address`) should be added to `helpers.sh` for this test.
+
 #### 27. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
@@ -896,6 +913,18 @@ Feature: End-to-end diagnose JSON output
     Then the output is a valid JSON array
     And an element has "pattern": "configuration_drift"
     And the element has entity, severity, summary, details, suggested_actions, and related_entries fields
+
+Feature: End-to-end DHCP lease expiry and re-acquisition
+  Scenario: Address is removed when DHCP lease expires and restored when server returns
+    Given a namespace with veth pair "veth-dhcp0"/"veth-dhcp1"
+    And dnsmasq serving 10.99.1.100-10.99.1.200 with a 120-second lease on veth-dhcp1
+    And the daemon is running with a DHCP policy for veth-dhcp0
+    And veth-dhcp0 has acquired an address in the 10.99.1.0/24 range
+    When dnsmasq is killed
+    And the 120-second lease expires without renewal or rebind
+    Then veth-dhcp0 has no address in the 10.99.1.0/24 range
+    When dnsmasq is restarted with the same configuration
+    Then veth-dhcp0 acquires a new address in the 10.99.1.0/24 range within 30 seconds
 
 Feature: End-to-end unmanaged interfaces
   Scenario: Interfaces without policies are not modified
