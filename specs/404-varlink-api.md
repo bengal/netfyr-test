@@ -1,7 +1,7 @@
 # SPEC-404: Varlink API
 
 ## What
-Define the Varlink interface for communication between the `netfyr` CLI and the `netfyr-daemon`. The interface provides methods to submit policies (with replace-all semantics), query current state, perform dry-run previews, and check daemon status. The interface definition lives in the `netfyr-varlink` crate as both a `.varlink` interface file and generated Rust types.
+Define the Varlink interface for communication between the `netfyr` CLI and the `netfyr-daemon`. The interface provides methods to submit policies (with replace-all semantics), query current state, perform dry-run previews, and retrieve system overview information. The interface definition lives in the `netfyr-varlink` crate as both a `.varlink` interface file and generated Rust types.
 
 ## Why
 The CLI and daemon need a well-defined IPC protocol. Varlink is a simple, JSON-based interface description language designed for system services on Linux. It uses Unix domain sockets, supports service discovery, and has a straightforward request/response model. Varlink is a natural fit for netfyr because it is the standard IPC protocol for modern Linux system services, integrates with systemd socket activation, and has Rust client/server libraries.
@@ -25,7 +25,7 @@ method Query(selector: ?Selector) -> (entities: []State)
 
 method DryRun(policies: []Policy) -> (diff: StateDiff)
 
-method GetStatus() -> (status: DaemonStatus)
+method GetShowInfo() -> (info: ShowInfo)
 
 type Policy (
     name: string,
@@ -98,18 +98,32 @@ type FieldChange (
     desired: ?object
 )
 
-type DaemonStatus (
-    uptime_seconds: int,
-    active_policies: int,
-    running_factories: []FactoryStatus
+type ShowInfo (
+    daemon: DaemonInfo,
+    interfaces: []InterfaceInfo
 )
 
-type FactoryStatus (
-    policy_id: string,
-    factory_type: string,
-    interface_name: string,
+type DaemonInfo (
+    status: string,
+    uptime_seconds: ?int
+)
+
+type InterfaceInfo (
+    name: string,
+    policies: ?[]PolicyInfo,
+    dhcp: ?DhcpInfo
+)
+
+type PolicyInfo (
+    name: string,
+    type: string
+)
+
+type DhcpInfo (
     state: string,
-    lease_ip: ?string
+    lease_address: ?string,
+    lease_time_secs: ?int,
+    lease_remaining_secs: ?int
 )
 
 error InvalidPolicy (reason: string)
@@ -145,8 +159,8 @@ impl VarlinkClient {
     /// Dry-run: compute what would change if these policies were submitted.
     pub async fn dry_run(&self, policies: Vec<Policy>) -> Result<StateDiff>;
 
-    /// Get daemon status.
-    pub async fn get_status(&self) -> Result<DaemonStatus>;
+    /// Get system overview (daemon status, interfaces, policies, DHCP state).
+    pub async fn get_show_info(&self) -> Result<ShowInfo>;
 }
 ```
 
@@ -181,9 +195,13 @@ The socket is:
 - Returns: StateDiff with the operations that would be performed.
 - Errors: `InvalidPolicy`, `BackendError`.
 
-**GetStatus**:
+**GetShowInfo**:
 - Input: none.
-- Returns: DaemonStatus with uptime, active policy count, and running factory details.
+- The daemon enumerates all system interfaces via the backend (`query_all()`), cross-references each with the policy store (to find policies targeting that interface) and the factory manager (to find DHCP state), and builds the `ShowInfo` response.
+- Returns: `ShowInfo` with daemon status and per-interface details.
+- `DaemonInfo.status` is always `"running"` when called via Varlink (the method is only reachable when the daemon is running). `uptime_seconds` is present when status is `"running"`.
+- `InterfaceInfo.policies` is present (possibly empty array) for all interfaces when the daemon has policy data. The CLI sets it to absent when fabricating the response in daemon-free mode.
+- `InterfaceInfo.dhcp` is present only for interfaces with a DHCP factory. `DhcpInfo.lease_address`, `lease_time_secs`, and `lease_remaining_secs` are present only when `state` is `"running"` (not `"waiting"`).
 - Errors: `InternalError` on unexpected failures.
 
 ### Type mapping
@@ -196,6 +214,7 @@ impl TryFrom<varlink::Policy> for Policy { ... }
 impl From<StateSet> for Vec<varlink::State> { ... }
 impl From<ApplyReport> for varlink::ApplyReport { ... }
 impl From<StateDiff> for varlink::StateDiff { ... }
+impl From<ShowInfo> for varlink::ShowInfo { ... }
 ```
 
 ### Error handling
@@ -229,7 +248,7 @@ Feature: Varlink API definition
     Given the file src/io.netfyr.varlink exists
     When it is parsed by a Varlink interface parser
     Then it parses without errors
-    And it defines 4 methods: SubmitPolicies, Query, DryRun, GetStatus
+    And it defines 4 methods: SubmitPolicies, Query, DryRun, GetShowInfo
 
   Scenario: Client connects to daemon socket
     Given the daemon is running and listening on /run/netfyr/netfyr.sock
@@ -273,12 +292,17 @@ Feature: Varlink API definition
     Then a StateDiff is returned with a Modify operation for eth0
     And the system mtu is still 1500
 
-  Scenario: GetStatus returns daemon information
+  Scenario: GetShowInfo returns system overview
     Given a connected VarlinkClient
     And the daemon has been running for 60 seconds with 3 policies
-    When get_status is called
-    Then the DaemonStatus shows uptime >= 60
-    And active_policies = 3
+    And the system has interfaces eth0, eth1, and lo
+    And eth0 has a DHCP factory in running state with a lease
+    When get_show_info is called
+    Then the ShowInfo has daemon.status = "running"
+    And daemon.uptime_seconds >= 60
+    And interfaces has 3 elements
+    And eth0's entry has a policies array and a dhcp object
+    And lo's entry has no policies or dhcp
 
   Scenario: Type conversion roundtrip
     Given a netfyr-policy Policy object

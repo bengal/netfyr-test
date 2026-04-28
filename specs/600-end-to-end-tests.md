@@ -511,6 +511,158 @@ Verifies that the daemon removes the DHCP-assigned address when the lease expire
 
 Note: this test takes approximately 2–3 minutes because the minimum dnsmasq lease time is 120 seconds. The polling helper `wait_for_no_address IFACE PREFIX TIMEOUT_SECONDS` (analogous to the existing `wait_for_address`) should be added to `helpers.sh` for this test.
 
+#### 34. Show with static policies only (`600-e2e-show-static.sh`)
+Verifies that `netfyr show` displays daemon info and managed interfaces with static policies:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Start the daemon.
+3. Apply two static policies: one setting mtu=1400 on `veth-e2e0` and another setting mtu=1300 on `veth-e2e1`.
+4. Run `netfyr show`.
+5. Verify the output contains `Daemon` followed by `Status:` showing `running`.
+6. Verify the `Uptime:` line shows a duration (matches a pattern like `Ns`, `Nm`, or `Nm Ns`).
+7. Verify the `Interfaces` section lists `veth-e2e0` with a `Policies:` line containing `(static)`.
+8. Verify the `Interfaces` section lists `veth-e2e1` with a `Policies:` line containing `(static)`.
+9. Verify no `DHCP:` or `Lease:` lines appear in the output.
+10. Verify the exit code is 0.
+
+#### 35. Show with DHCP lease (`600-e2e-show-dhcp-lease.sh`)
+Verifies that `netfyr show` displays DHCP factory details including lease timing per interface:
+1. Create veth pair `veth-dhcp0`/`veth-dhcp1`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-dhcp1` serving `10.99.1.100-10.99.1.200` with a 120-second lease.
+4. Start the daemon.
+5. Write a DHCP policy named `e2e-show-dhcp` for `veth-dhcp0` and run `netfyr apply`.
+6. Wait for the DHCP address to appear on `veth-dhcp0` (poll up to 10 s).
+7. Run `netfyr show` and capture the output.
+8. Verify the interface section for `veth-dhcp0` contains `Policies:` with `e2e-show-dhcp` and `(dhcpv4)`.
+9. Verify the `DHCP:` line shows `running`.
+10. Verify the `Lease:` line contains `120s total`.
+11. Verify the `Lease:` line contains `remaining` with a time value.
+12. Verify the exit code is 0.
+
+#### 36. Show with DHCP factory in waiting state (`600-e2e-show-dhcp-waiting.sh`)
+Verifies that `netfyr show` displays a waiting DHCP factory per interface:
+1. Create veth pair `veth-dhcp0`/`veth-dhcp1`.
+2. Do NOT start dnsmasq (no DHCP server available).
+3. Start the daemon.
+4. Write a DHCP policy named `e2e-show-wait` for `veth-dhcp0` and run `netfyr apply`.
+5. Sleep 1 second (allow the factory to start and enter waiting state).
+6. Run `netfyr show` and capture the output.
+7. Verify the interface section for `veth-dhcp0` contains `Policies:` with `e2e-show-wait`.
+8. Verify the `DHCP:` line shows `waiting`.
+9. Verify the output does NOT contain a `Lease:` line for `veth-dhcp0`.
+10. Verify the exit code is 0.
+
+#### 37. Show JSON output with DHCP lease (`600-e2e-show-json.sh`)
+Verifies that `netfyr show -o json` produces valid JSON with the new interface-centric structure:
+1. Create veth pair `veth-dhcp0`/`veth-dhcp1`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-dhcp1` serving `10.99.1.100-10.99.1.200` with a 120-second lease.
+4. Start the daemon.
+5. Write a DHCP policy named `e2e-show-json` for `veth-dhcp0` and run `netfyr apply`.
+6. Wait for the DHCP address to appear on `veth-dhcp0` (poll up to 10 s).
+7. Run `netfyr show -o json` and capture the output.
+8. Pipe the output through `jq` to validate it is a JSON object.
+9. Verify `daemon.status` is `"running"` (use `jq '.daemon.status'`).
+10. Verify `daemon.uptime_seconds` is a non-negative integer.
+11. Verify `interfaces` is an array with at least 1 element.
+12. Find the element with `"name": "veth-dhcp0"` in the `interfaces` array.
+13. Verify the element has `policies` array with an entry where `"name"` is `"e2e-show-json"` and `"type"` is `"dhcpv4"`.
+14. Verify the element has `dhcp.state` equal to `"running"`.
+15. Verify `dhcp.lease_address` contains `10.99.1.` and `/`.
+16. Verify `dhcp.lease_time_secs` equals `120`.
+17. Verify `dhcp.lease_remaining_secs` is a non-negative integer less than or equal to 120.
+18. Verify the exit code is 0.
+
+#### 38. Show JSON output for waiting factory (`600-e2e-show-json-waiting.sh`)
+Verifies that `netfyr show -o json` correctly represents a waiting DHCP factory:
+1. Create veth pair `veth-dhcp0`/`veth-dhcp1`.
+2. Do NOT start dnsmasq.
+3. Start the daemon.
+4. Write a DHCP policy named `e2e-show-jwait` for `veth-dhcp0` and run `netfyr apply`.
+5. Sleep 1 second.
+6. Run `netfyr show -o json` and capture the output.
+7. Pipe the output through `jq` to validate it is a JSON object.
+8. Find the element with `"name": "veth-dhcp0"` in the `interfaces` array.
+9. Verify the element has `dhcp.state` equal to `"waiting"`.
+10. Verify `dhcp` does NOT have `lease_time_secs` (use `jq '.interfaces[] | select(.name=="veth-dhcp0") | .dhcp | has("lease_time_secs")' == false`).
+11. Verify `dhcp` does NOT have `lease_remaining_secs`.
+12. Verify `dhcp` does NOT have `lease_address`.
+
+#### 39. Show when daemon is not running (`600-e2e-show-no-daemon.sh`)
+Verifies that `netfyr show` works gracefully when the daemon is not running, showing daemon status and basic interface listing:
+1. Create veth pair `veth-e2e0`/`veth-e2e1` (interfaces are needed to verify listing).
+2. Set `NETFYR_SOCKET_PATH` to a nonexistent path (e.g., `$TMPDIR_TEST/nonexistent.sock`).
+3. Do NOT start the daemon.
+4. Run `netfyr show` and capture stdout and exit code.
+5. Verify the exit code is 0.
+6. Verify the output contains `Daemon` followed by `Status:` showing `not running`.
+7. Verify the `Interfaces` section lists `veth-e2e0` (the interface exists in the namespace).
+8. Verify the output does NOT contain `Policies:`, `DHCP:`, or `Lease:` lines.
+
+#### 40. Show with mixed static and DHCP policies (`600-e2e-show-mixed.sh`)
+Verifies that `netfyr show` shows both static and DHCP managed interfaces with their policies:
+1. Create two veth pairs: `veth-static0`/`veth-static1` and `veth-dhcp0`/`veth-dhcp1`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-dhcp1` serving `10.99.1.100-10.99.1.200` with a 120-second lease.
+4. Start the daemon.
+5. Write a static policy for `veth-static0` (mtu=1400) and a DHCP policy for `veth-dhcp0`.
+6. Apply both policies.
+7. Wait for the DHCP address to appear on `veth-dhcp0` (poll up to 10 s).
+8. Run `netfyr show` and capture the output.
+9. Verify `veth-static0` has a `Policies:` line with `(static)`.
+10. Verify `veth-dhcp0` has a `Policies:` line with `(dhcpv4)` and a `DHCP:` line showing `running`.
+11. Verify `veth-dhcp0` has a `Lease:` line with `120s total`.
+12. Verify unmanaged interfaces (e.g., `veth-static1`, `veth-dhcp1`) appear as bare names without `Policies:` lines.
+13. Run `netfyr show -o json`.
+14. Verify `daemon.status` is `"running"`.
+15. Verify the `interfaces` array contains entries for both managed and unmanaged interfaces.
+
+#### 41. Show lists all system interfaces including unmanaged (`600-e2e-show-unmanaged.sh`)
+Verifies that `netfyr show` lists every system interface, not just managed ones:
+1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
+2. Configure `veth-dhcp1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-dhcp1` serving `10.99.1.100-10.99.1.200` with a 120-second lease.
+4. Start the daemon.
+5. Apply a static policy for `veth-managed0` and a DHCP policy for `veth-dhcp0`.
+6. Wait for the DHCP address to appear on `veth-dhcp0` (poll up to 10 s).
+7. Run `netfyr show` and capture the output.
+8. Verify `veth-managed0` appears with a `Policies:` line containing `(static)`.
+9. Verify `veth-dhcp0` appears with a `Policies:` line containing `(dhcpv4)` and a `DHCP:` line.
+10. Verify `veth-other0` appears in the output as a bare name (no `Policies:` line).
+11. Verify `veth-managed1` appears in the output as a bare name (unmanaged peer).
+12. Verify the total number of interfaces listed matches the system's interface count (use `ip -o link show | wc -l` as reference).
+
+#### 42. Show with multiple policies on one interface (`600-e2e-show-multi-policy.sh`)
+Verifies that `netfyr show` displays multiple policies for the same interface:
+1. Create veth pair `veth-multi0`/`veth-multi1`.
+2. Configure `veth-multi1` with address `10.99.1.1/24`.
+3. Start dnsmasq on `veth-multi1` serving `10.99.1.100-10.99.1.200` with a 120-second lease.
+4. Start the daemon.
+5. Write a static policy named `e2e-mtu` for `veth-multi0` setting mtu=1400, and a DHCP policy named `e2e-dhcp` for `veth-multi0`.
+6. Apply both policies.
+7. Wait for the DHCP address to appear on `veth-multi0` (poll up to 10 s).
+8. Run `netfyr show` and capture the output.
+9. Verify the `Policies:` line for `veth-multi0` contains both `e2e-mtu (static)` and `e2e-dhcp (dhcpv4)`, comma-separated.
+10. Verify the `DHCP:` line shows `running`.
+11. Verify the `Lease:` line shows `120s total`.
+12. Run `netfyr show -o json` and capture the output.
+13. Find the `veth-multi0` entry in the `interfaces` array.
+14. Verify `policies` is an array with exactly 2 elements.
+15. Verify one element has `"type": "static"` and the other has `"type": "dhcpv4"`.
+
+#### 43. Show JSON when daemon is not running (`600-e2e-show-json-no-daemon.sh`)
+Verifies that `netfyr show -o json` produces valid JSON when the daemon is not running:
+1. Create veth pair `veth-e2e0`/`veth-e2e1`.
+2. Set `NETFYR_SOCKET_PATH` to a nonexistent path (e.g., `$TMPDIR_TEST/nonexistent.sock`).
+3. Do NOT start the daemon.
+4. Run `netfyr show -o json` and capture the output.
+5. Pipe the output through `jq` to validate it is a JSON object.
+6. Verify `daemon.status` is `"not_running"`.
+7. Verify the `daemon` object does NOT have `uptime_seconds` (use `jq '.daemon | has("uptime_seconds")' == false`).
+8. Verify `interfaces` is an array with at least 1 element.
+9. Verify each interface element has only a `"name"` field (no `policies` or `dhcp`).
+10. Verify the exit code is 0.
+
 #### 27. Unmanaged interfaces are untouched (`600-e2e-unmanaged.sh`)
 Verifies that interfaces not targeted by any policy are left alone:
 1. Create three veth pairs: `veth-managed0`/`veth-managed1`, `veth-other0`/`veth-other1`, `veth-dhcp0`/`veth-dhcp1`.
@@ -537,6 +689,7 @@ Verifies that interfaces not targeted by any policy are left alone:
 - SPEC-401 (DHCP factory — needed for DHCP tests)
 - SPEC-402 (policy store — needed for persistence test)
 - SPEC-403 (daemon — needed for all daemon-mode tests)
+- SPEC-356 (show CLI — needed for show tests)
 - SPEC-405 (daemon debug logging — needed for debug logging test)
 
 ## Integration test infrastructure
@@ -913,6 +1066,103 @@ Feature: End-to-end diagnose JSON output
     Then the output is a valid JSON array
     And an element has "pattern": "configuration_drift"
     And the element has entity, severity, summary, details, suggested_actions, and related_entries fields
+
+Feature: End-to-end show with static policies
+  Scenario: Show displays daemon info and managed interfaces with static policies
+    Given a namespace with veth pairs and the daemon running
+    And two static policies are applied
+    When `netfyr show` is run
+    Then the output shows Daemon with Status "running" and Uptime
+    And managed interfaces show Policies lines with "(static)"
+    And no DHCP or Lease lines appear
+    And the exit code is 0
+
+Feature: End-to-end show with DHCP lease
+  Scenario: Show displays DHCP factory with lease timing per interface
+    Given a namespace with a DHCP-configured veth pair and a 120s lease
+    And the daemon is running with a DHCP policy applied
+    And the factory has acquired a lease
+    When `netfyr show` is run
+    Then the interface entry shows Policies with "(dhcpv4)"
+    And the DHCP line shows "running"
+    And the Lease line shows "120s total" and a positive remaining time
+    And the exit code is 0
+
+Feature: End-to-end show with waiting factory
+  Scenario: Show displays waiting DHCP state per interface
+    Given a namespace with a veth pair but no DHCP server
+    And the daemon is running with a DHCP policy applied
+    When `netfyr show` is run
+    Then the interface entry shows DHCP "waiting"
+    And no Lease line appears for that interface
+
+Feature: End-to-end show JSON output
+  Scenario: Show -o json produces valid JSON with interface-centric structure
+    Given a namespace with a DHCP-configured veth pair and a 120s lease
+    And the daemon is running and the factory has acquired a lease
+    When `netfyr show -o json` is run
+    Then the output is a valid JSON object
+    And "daemon.status" is "running"
+    And "daemon.uptime_seconds" is a non-negative integer
+    And the interface entry for the DHCP interface has a "policies" array
+    And the entry has "dhcp.state" equal to "running"
+    And "dhcp.lease_time_secs" equals 120
+    And "dhcp.lease_remaining_secs" is a non-negative integer <= 120
+    And "dhcp.lease_address" contains the leased CIDR
+
+  Scenario: Show -o json for waiting factory omits lease fields
+    Given a namespace with a DHCP policy but no DHCP server
+    When `netfyr show -o json` is run
+    Then the interface entry has "dhcp.state": "waiting"
+    And the dhcp object does not have "lease_time_secs", "lease_remaining_secs", or "lease_address"
+
+Feature: End-to-end show when daemon is not running
+  Scenario: Show works gracefully when daemon is unavailable
+    Given a namespace with network interfaces
+    And the netfyr daemon is not running
+    When `netfyr show` is run
+    Then the exit code is 0
+    And the output shows Daemon Status "not running"
+    And the Interfaces section lists system interfaces as bare names
+    And no Policies, DHCP, or Lease lines appear
+
+Feature: End-to-end show with mixed policies
+  Scenario: Show displays both static and DHCP managed interfaces
+    Given a namespace with static and DHCP policies applied
+    And the DHCP factory has acquired a lease
+    When `netfyr show` is run
+    Then the static interface shows Policies with "(static)"
+    And the DHCP interface shows Policies with "(dhcpv4)" and DHCP "running"
+    And unmanaged interfaces appear as bare names
+    And `netfyr show -o json` has daemon.status="running" and all interfaces listed
+
+Feature: End-to-end show lists all interfaces
+  Scenario: Show lists all system interfaces including unmanaged
+    Given a namespace with managed and unmanaged interfaces
+    And the daemon is running with policies for some interfaces
+    When `netfyr show` is run
+    Then all system interfaces appear in the output
+    And managed interfaces have Policies lines
+    And unmanaged interfaces appear as bare names
+
+Feature: End-to-end show with multiple policies per interface
+  Scenario: Show displays multiple policies on the same interface
+    Given a namespace with an interface targeted by both a static and DHCP policy
+    And the DHCP factory has acquired a lease
+    When `netfyr show` is run
+    Then the Policies line lists both policies comma-separated
+    And the DHCP line shows "running"
+    And `netfyr show -o json` shows a policies array with 2 elements
+
+Feature: End-to-end show JSON when daemon is not running
+  Scenario: Show -o json produces valid JSON without daemon
+    Given a namespace with network interfaces
+    And the netfyr daemon is not running
+    When `netfyr show -o json` is run
+    Then the output is a valid JSON object
+    And "daemon.status" is "not_running"
+    And "daemon" has no "uptime_seconds" field
+    And "interfaces" is an array of objects with only "name" fields
 
 Feature: End-to-end DHCP lease expiry and re-acquisition
   Scenario: Address is removed when DHCP lease expires and restored when server returns

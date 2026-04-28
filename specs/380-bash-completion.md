@@ -13,7 +13,7 @@ Tab completion is essential for CLI usability. Without it, users must remember e
 ```bash
 # Complete subcommands
 netfyr <Tab>
-# offers: apply  query  history  revert
+# offers: apply  query  history  revert  show
 
 # Complete flags for a subcommand
 netfyr query --<Tab>
@@ -107,6 +107,7 @@ Feature: Bash completion generation
     And the output contains "history"
     And the output contains "revert"
     And the output contains "diagnose"
+    And the output contains "show"
     And the output contains "completions"
 
   Scenario: Completion script contains global flags
@@ -133,7 +134,7 @@ Feature: Bash completion works interactively
   Scenario: Subcommand completion
     Given bash completion for netfyr is loaded
     When the user types "netfyr " and presses Tab
-    Then "apply", "query", "history", "revert", "diagnose", and "completions" are offered
+    Then "apply", "query", "history", "revert", "show", "diagnose", and "completions" are offered
 
   Scenario: Flag completion for query
     Given bash completion for netfyr is loaded

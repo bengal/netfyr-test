@@ -203,9 +203,11 @@ async fn serve_varlink(
                         ).await?;
                         request.reply(diff)?;
                     }
-                    VarlinkRequest::GetStatus => {
-                        let status = build_status(&policy_store, &factory_manager);
-                        request.reply(status)?;
+                    VarlinkRequest::GetShowInfo => {
+                        let info = build_show_info(
+                            &policy_store, &factory_manager, &reconciler
+                        ).await?;
+                        request.reply(info)?;
                     }
                 }
             }
@@ -383,11 +385,13 @@ Feature: Query via daemon
     And returns the StateDiff without applying
     And the current system state is unchanged
 
-  Scenario: GetStatus returns daemon information
+  Scenario: GetShowInfo returns system overview
     Given the daemon is running with 3 policies and 1 DHCP factory
-    When a GetStatus request is received
-    Then the response includes 3 active policies
-    And 1 running factory with its status
+    And the system has 3 network interfaces
+    When a GetShowInfo request is received
+    Then the response includes daemon status "running" with uptime
+    And interfaces includes all 3 system interfaces
+    And the DHCP-managed interface has policies and dhcp fields
 
 Feature: Integration tests for daemon (shell scripts)
   Scenario: Daemon applies static policy in namespace
